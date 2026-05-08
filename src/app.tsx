@@ -54,6 +54,7 @@ type NotificationChannel = {
   name: string;
   type: "generic_webhook" | "wecom" | "telegram";
   url?: string;
+  botToken?: string;
   chatId?: string;
   enabled: boolean;
   createdAt: string;
@@ -121,8 +122,10 @@ const text = {
     name: "Name",
     type: "Type",
     webhookUrl: "Webhook URL",
+    botToken: "Telegram bot token",
     chatId: "Telegram chat ID",
     saveChannel: "Save channel",
+    saveAndTest: "Save and test",
     test: "Test",
     audit: "Operation Audit",
     auditHelp: "Recent web, Telegram, agent, and system actions.",
@@ -174,8 +177,10 @@ const text = {
     name: "名称",
     type: "类型",
     webhookUrl: "Webhook 地址",
+    botToken: "Telegram Bot Token",
     chatId: "Telegram Chat ID",
     saveChannel: "保存渠道",
+    saveAndTest: "保存并测试",
     test: "测试",
     audit: "操作审计",
     auditHelp: "最近的页面、Telegram、agent 和系统操作。",
@@ -286,6 +291,7 @@ export default function App() {
     name: "",
     type: "wecom" as NotificationChannel["type"],
     url: "",
+    botToken: "",
     chatId: ""
   });
   const [aiCommand, setAiCommand] = useState("");
@@ -466,6 +472,27 @@ export default function App() {
         name: "",
         type: "wecom",
         url: "",
+        botToken: "",
+        chatId: ""
+      });
+      await reload();
+    });
+  }
+
+  function saveAndTestNotification() {
+    void withLoading(async () => {
+      const channel = await api<NotificationChannel>("/api/notifications", {
+        method: "POST",
+        body: JSON.stringify(notificationForm)
+      });
+      await api(`/api/notifications/${encodeURIComponent(channel.id)}/test`, {
+        method: "POST"
+      });
+      setNotificationForm({
+        name: "",
+        type: "wecom",
+        url: "",
+        botToken: "",
         chatId: ""
       });
       await reload();
@@ -844,6 +871,22 @@ export default function App() {
               placeholder="https://..."
             />
           </label>
+          {notificationForm.type === "telegram" && (
+            <label>
+              {t.botToken}
+              <input
+                type="password"
+                value={notificationForm.botToken}
+                onChange={(event) =>
+                  setNotificationForm((current) => ({
+                    ...current,
+                    botToken: event.target.value
+                  }))
+                }
+                placeholder="123456:ABC..."
+              />
+            </label>
+          )}
           <label>
             {t.chatId}
             <input
@@ -862,6 +905,13 @@ export default function App() {
             onClick={saveNotification}
           >
             {t.saveChannel}
+          </button>
+          <button
+            className="secondary"
+            disabled={loading || !notificationForm.name.trim()}
+            onClick={saveAndTestNotification}
+          >
+            {t.saveAndTest}
           </button>
         </div>
         {notifications.length > 0 && (

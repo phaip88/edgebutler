@@ -74,6 +74,7 @@ type NotificationChannel = {
   name: string;
   type: "generic_webhook" | "wecom" | "telegram";
   url?: string;
+  botToken?: string;
   chatId?: string;
   enabled: boolean;
   createdAt: string;
@@ -330,10 +331,11 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   private async sendNotification(channel: NotificationChannel, text: string) {
     if (!channel.enabled) return;
     if (channel.type === "telegram") {
-      if (!this.env.TELEGRAM_BOT_TOKEN || !channel.chatId) {
+      const token = channel.botToken || this.env.TELEGRAM_BOT_TOKEN;
+      if (!token || !channel.chatId) {
         throw new Error("Telegram token or chat id is missing.");
       }
-      await sendTelegram(this.env.TELEGRAM_BOT_TOKEN, channel.chatId, text);
+      await sendTelegram(token, channel.chatId, text);
       return;
     }
 
@@ -445,6 +447,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     name?: string;
     type?: "generic_webhook" | "wecom" | "telegram";
     url?: string;
+    botToken?: string;
     chatId?: string;
     enabled?: boolean;
   }) {
@@ -458,6 +461,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       name: safeString(input.name) || existing?.name || "Notification channel",
       type: input.type || existing?.type || "generic_webhook",
       url: safeString(input.url) || existing?.url,
+      botToken: safeString(input.botToken) || existing?.botToken,
       chatId: safeString(input.chatId) || existing?.chatId,
       enabled: input.enabled ?? existing?.enabled ?? true,
       createdAt: existing?.createdAt || now,
