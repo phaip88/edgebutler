@@ -72,6 +72,122 @@ type AuthStatus = {
   authConfigured: boolean;
 };
 
+type Language = "zh" | "en";
+
+const text = {
+  en: {
+    loginTitle: "Admin Login",
+    loginLead:
+      "Enter the admin password or token configured in Cloudflare secrets.",
+    noSecret:
+      "No admin secret is configured. Set ADMIN_PASSWORD or ADMIN_TOKEN before production deployment.",
+    credential: "Admin credential",
+    signIn: "Sign in",
+    signOut: "Sign out",
+    title: "EdgeButler Operations",
+    lead: "A professional AI-assisted console for multi-VPS operations, controlled refresh, approvals, and notifications.",
+    totalVps: "Total VPS",
+    online: "Online",
+    pending: "Pending",
+    notifications: "Notifications",
+    fleet: "VPS Fleet",
+    fleetHelp:
+      "Status is pulled on demand. No continuous monitoring runs after closing the page.",
+    reload: "Reload",
+    refreshAll: "Refresh all VPS",
+    refreshOne: "Refresh this VPS",
+    edit: "Edit",
+    delete: "Delete",
+    noVps:
+      "No VPS registered yet. Generate an install command and run it on a test VPS.",
+    addVps: "Add VPS",
+    addVpsHelp: "Generate a one-time install command for a new agent.",
+    customName: "Custom name",
+    username: "Username",
+    location: "Location",
+    generateInstall: "Generate install command",
+    expires: "Expires",
+    aiOps: "AI Operations",
+    aiOpsHelp:
+      "Ask for diagnostics or operations. Mutating actions require web confirmation.",
+    runAi: "Run AI command",
+    pendingTitle: "Pending Confirmations",
+    pendingHelp: "Mutating operations expire after 10 minutes.",
+    confirm: "Confirm",
+    cancel: "Cancel",
+    notificationTitle: "Notification Channels",
+    notificationHelp:
+      "Configure Telegram, Enterprise WeChat, or generic webhooks.",
+    name: "Name",
+    type: "Type",
+    webhookUrl: "Webhook URL",
+    chatId: "Telegram chat ID",
+    saveChannel: "Save channel",
+    test: "Test",
+    audit: "Operation Audit",
+    auditHelp: "Recent web, Telegram, agent, and system actions.",
+    noOps: "No operations yet.",
+    noSnapshot: "No realtime snapshot yet.",
+    lastSeen: "Last seen",
+    serverNamePrompt: "Server name",
+    locationPrompt: "Location",
+    deleteConfirm: "Delete this VPS from EdgeButler?"
+  },
+  zh: {
+    loginTitle: "管理员登录",
+    loginLead: "输入 Cloudflare Secret 中配置的管理员密码或令牌。",
+    noSecret:
+      "尚未配置管理员密钥。生产部署前请设置 ADMIN_PASSWORD 或 ADMIN_TOKEN。",
+    credential: "管理员凭据",
+    signIn: "登录",
+    signOut: "退出",
+    title: "EdgeButler 运维平台",
+    lead: "面向多 VPS 的 AI 运维控制台，支持按需刷新、二次确认、审计和多渠道通知。",
+    totalVps: "VPS 总数",
+    online: "在线",
+    pending: "待确认",
+    notifications: "通知渠道",
+    fleet: "VPS 集群",
+    fleetHelp: "状态按需拉取。关闭页面后不会继续实时监控。",
+    reload: "重新加载",
+    refreshAll: "刷新全部 VPS",
+    refreshOne: "刷新此 VPS",
+    edit: "编辑",
+    delete: "删除",
+    noVps: "还没有注册 VPS。请先生成安装命令，并在测试 VPS 上运行。",
+    addVps: "新增 VPS",
+    addVpsHelp: "为新 agent 生成一次性安装命令。",
+    customName: "自定义名称",
+    username: "用户名",
+    location: "位置",
+    generateInstall: "生成安装命令",
+    expires: "过期时间",
+    aiOps: "AI 运维",
+    aiOpsHelp: "输入诊断或运维指令。变更操作必须在页面端二次确认。",
+    runAi: "执行 AI 指令",
+    pendingTitle: "待确认操作",
+    pendingHelp: "变更操作 10 分钟后过期。",
+    confirm: "确认执行",
+    cancel: "取消",
+    notificationTitle: "通知渠道",
+    notificationHelp: "配置 Telegram、企业微信或通用 Webhook。",
+    name: "名称",
+    type: "类型",
+    webhookUrl: "Webhook 地址",
+    chatId: "Telegram Chat ID",
+    saveChannel: "保存渠道",
+    test: "测试",
+    audit: "操作审计",
+    auditHelp: "最近的页面、Telegram、agent 和系统操作。",
+    noOps: "暂无操作记录。",
+    noSnapshot: "还没有实时快照。",
+    lastSeen: "最后在线",
+    serverNamePrompt: "服务器名称",
+    locationPrompt: "位置",
+    deleteConfirm: "确定从 EdgeButler 删除这台 VPS？"
+  }
+} satisfies Record<Language, Record<string, string>>;
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -87,17 +203,43 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-function formatDate(value?: string) {
+function formatDate(value?: string, language: Language = "en") {
   if (!value) return "never";
-  return new Date(value).toLocaleString();
+  return new Date(value).toLocaleString(language === "zh" ? "zh-CN" : "en-US");
 }
 
-function StatusPill({ status }: { status: ManagedServer["status"] }) {
-  return <span className={`status status-${status}`}>{status}</span>;
+function StatusPill({
+  status,
+  language
+}: {
+  status: ManagedServer["status"];
+  language: Language;
+}) {
+  const labels = {
+    en: {
+      pending: "pending",
+      online: "online",
+      offline: "offline",
+      unknown: "unknown"
+    },
+    zh: { pending: "待安装", online: "在线", offline: "离线", unknown: "未知" }
+  };
+  return (
+    <span className={`status status-${status}`}>
+      {labels[language][status]}
+    </span>
+  );
 }
 
-function Snapshot({ snapshot }: { snapshot?: ServerSnapshot }) {
-  if (!snapshot) return <p className="muted">No realtime snapshot yet.</p>;
+function Snapshot({
+  snapshot,
+  language
+}: {
+  snapshot?: ServerSnapshot;
+  language: Language;
+}) {
+  const t = text[language];
+  if (!snapshot) return <p className="muted">{t.noSnapshot}</p>;
   const items = [
     ["Host", snapshot.hostname],
     ["OS", snapshot.os],
@@ -120,6 +262,10 @@ function Snapshot({ snapshot }: { snapshot?: ServerSnapshot }) {
 }
 
 export default function App() {
+  const [language, setLanguage] = useState<Language>(() => {
+    const saved = localStorage.getItem("edgebutler-language");
+    return saved === "zh" || saved === "en" ? saved : "zh";
+  });
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [password, setPassword] = useState("");
   const [servers, setServers] = useState<ManagedServer[]>([]);
@@ -146,6 +292,7 @@ export default function App() {
   const [aiOutput, setAiOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const t = text[language];
 
   const onlineCount = useMemo(
     () => servers.filter((server) => server.status === "online").length,
@@ -185,6 +332,11 @@ export default function App() {
       if (status.authenticated) await reload();
     });
   }, []);
+
+  function changeLanguage(next: Language) {
+    setLanguage(next);
+    localStorage.setItem("edgebutler-language", next);
+  }
 
   function login() {
     void withLoading(async () => {
@@ -245,9 +397,9 @@ export default function App() {
   }
 
   function editServer(server: ManagedServer) {
-    const name = window.prompt("Server name", server.name);
+    const name = window.prompt(t.serverNamePrompt, server.name);
     if (name === null) return;
-    const location = window.prompt("Location", server.location);
+    const location = window.prompt(t.locationPrompt, server.location);
     if (location === null) return;
     void withLoading(async () => {
       await api(`/api/servers/${encodeURIComponent(server.id)}`, {
@@ -259,9 +411,7 @@ export default function App() {
   }
 
   function deleteServer(server: ManagedServer) {
-    if (
-      !window.confirm(`Delete ${server.name}? This removes it from EdgeButler.`)
-    ) {
+    if (!window.confirm(`${t.deleteConfirm}\n${server.name}`)) {
       return;
     }
     void withLoading(async () => {
@@ -343,28 +493,34 @@ export default function App() {
   if (!auth?.authenticated) {
     return (
       <main className="shell auth-shell">
+        <div className="language-switch floating-switch">
+          <button
+            className={language === "zh" ? "active" : "secondary"}
+            onClick={() => changeLanguage("zh")}
+          >
+            中文
+          </button>
+          <button
+            className={language === "en" ? "active" : "secondary"}
+            onClick={() => changeLanguage("en")}
+          >
+            EN
+          </button>
+        </div>
         <section className="hero auth-hero">
           <div>
             <p className="eyebrow">EdgeButler</p>
-            <h1>Admin Login</h1>
-            <p className="lead">
-              Enter the admin password or token configured in Cloudflare
-              secrets.
-            </p>
+            <h1>{t.loginTitle}</h1>
+            <p className="lead">{t.loginLead}</p>
           </div>
         </section>
 
         {error && <div className="alert">{error}</div>}
 
         <section className="panel auth-panel">
-          {!auth?.authConfigured && (
-            <div className="alert">
-              No admin secret is configured. Set ADMIN_PASSWORD or ADMIN_TOKEN
-              before production deployment.
-            </div>
-          )}
+          {!auth?.authConfigured && <div className="alert">{t.noSecret}</div>}
           <label>
-            Admin credential
+            {t.credential}
             <input
               type="password"
               value={password}
@@ -376,7 +532,7 @@ export default function App() {
             />
           </label>
           <button disabled={loading || !password.trim()} onClick={login}>
-            Sign in
+            {t.signIn}
           </button>
         </section>
       </main>
@@ -385,37 +541,135 @@ export default function App() {
 
   return (
     <main className="shell">
-      <section className="hero">
+      <header className="topbar">
         <div>
           <p className="eyebrow">EdgeButler</p>
-          <h1>AI VPS Operations Console</h1>
-          <p className="lead">
-            Manage Linux VPS nodes through one-click agent install, on-demand
-            status refresh, and AI-assisted operations.
-          </p>
+          <h1>{t.title}</h1>
+          <p className="lead">{t.lead}</p>
         </div>
-        <div className="stats-card">
-          <span>{servers.length}</span>
-          <p>Total VPS</p>
-          <strong>{onlineCount} online</strong>
-          <button className="secondary small-button" onClick={logout}>
-            Sign out
+        <div className="topbar-actions">
+          <div className="language-switch">
+            <button
+              className={language === "zh" ? "active" : "secondary"}
+              onClick={() => changeLanguage("zh")}
+            >
+              中文
+            </button>
+            <button
+              className={language === "en" ? "active" : "secondary"}
+              onClick={() => changeLanguage("en")}
+            >
+              EN
+            </button>
+          </div>
+          <button className="secondary" onClick={logout}>
+            {t.signOut}
           </button>
+        </div>
+      </header>
+
+      <section className="metric-grid">
+        <div className="metric-card">
+          <span>{servers.length}</span>
+          <p>{t.totalVps}</p>
+        </div>
+        <div className="metric-card good">
+          <span>{onlineCount}</span>
+          <p>{t.online}</p>
+        </div>
+        <div className="metric-card warn">
+          <span>{pendingOperations.length}</span>
+          <p>{t.pending}</p>
+        </div>
+        <div className="metric-card">
+          <span>{notifications.length}</span>
+          <p>{t.notifications}</p>
         </div>
       </section>
 
       {error && <div className="alert">{error}</div>}
 
+      <section className="panel fleet-panel">
+        <div className="panel-header">
+          <div>
+            <h2>{t.fleet}</h2>
+            <p>{t.fleetHelp}</p>
+          </div>
+          <div className="button-row">
+            <button className="secondary" disabled={loading} onClick={reload}>
+              {t.reload}
+            </button>
+            <button
+              className="secondary"
+              disabled={loading}
+              onClick={refreshAll}
+            >
+              {t.refreshAll}
+            </button>
+          </div>
+        </div>
+
+        {servers.length === 0 ? (
+          <div className="empty">{t.noVps}</div>
+        ) : (
+          <div className="server-grid">
+            {servers.map((server) => (
+              <article className="server-card" key={server.id}>
+                <div className="server-title">
+                  <div>
+                    <h3>{server.name}</h3>
+                    <p>{server.host}</p>
+                  </div>
+                  <StatusPill status={server.status} language={language} />
+                </div>
+                <Snapshot snapshot={server.lastSnapshot} language={language} />
+                <div className="server-meta">
+                  <span>ID: {server.id}</span>
+                  <span>
+                    {t.location}: {server.location}
+                  </span>
+                  <span>
+                    {t.lastSeen}: {formatDate(server.lastSeenAt, language)}
+                  </span>
+                </div>
+                <div className="button-row">
+                  <button
+                    disabled={loading}
+                    onClick={() => refreshServer(server.id)}
+                  >
+                    {t.refreshOne}
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={loading}
+                    onClick={() => editServer(server)}
+                  >
+                    {t.edit}
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={loading}
+                    onClick={() => deleteServer(server)}
+                  >
+                    {t.delete}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="grid two">
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>Add VPS</h2>
-              <p>Generate a one-time install command for a new agent.</p>
+              <h2>{t.addVps}</h2>
+              <p>{t.addVpsHelp}</p>
             </div>
           </div>
           <label>
-            Custom name
+            {t.customName}
             <input
               value={installForm.name}
               onChange={(event) =>
@@ -428,7 +682,7 @@ export default function App() {
             />
           </label>
           <label>
-            Username
+            {t.username}
             <input
               value={installForm.username}
               onChange={(event) =>
@@ -441,7 +695,7 @@ export default function App() {
             />
           </label>
           <label>
-            Location
+            {t.location}
             <input
               value={installForm.location}
               onChange={(event) =>
@@ -454,13 +708,13 @@ export default function App() {
             />
           </label>
           <button disabled={loading} onClick={createInstallToken}>
-            Generate install command
+            {t.generateInstall}
           </button>
           {installToken && (
             <div className="command-box">
               <div>
-                <strong>Expires</strong>
-                <span>{formatDate(installToken.expiresAt)}</span>
+                <strong>{t.expires}</strong>
+                <span>{formatDate(installToken.expiresAt, language)}</span>
               </div>
               <pre>{installToken.installCommand}</pre>
             </div>
@@ -470,11 +724,8 @@ export default function App() {
         <div className="panel">
           <div className="panel-header">
             <div>
-              <h2>AI Operations</h2>
-              <p>
-                Use Chinese or English instructions. Mutating actions require
-                confirmation.
-              </p>
+              <h2>{t.aiOps}</h2>
+              <p>{t.aiOpsHelp}</p>
             </div>
           </div>
           <textarea
@@ -487,14 +738,14 @@ export default function App() {
               disabled={loading || !aiCommand.trim()}
               onClick={runAiCommand}
             >
-              Run AI command
+              {t.runAi}
             </button>
             <button
               className="secondary"
               disabled={loading}
               onClick={refreshAll}
             >
-              Refresh all VPS
+              {t.refreshAll}
             </button>
           </div>
           {aiOutput && <pre className="output">{aiOutput}</pre>}
@@ -505,8 +756,8 @@ export default function App() {
         <section className="panel danger-panel">
           <div className="panel-header">
             <div>
-              <h2>Pending Confirmations</h2>
-              <p>Mutating operations expire after 10 minutes.</p>
+              <h2>{t.pendingTitle}</h2>
+              <p>{t.pendingHelp}</p>
             </div>
           </div>
           <div className="pending-list">
@@ -518,21 +769,23 @@ export default function App() {
                     {operation.serverName} /{" "}
                     {operation.command || operation.target || "no target"}
                   </p>
-                  <span>Expires: {formatDate(operation.expiresAt)}</span>
+                  <span>
+                    {t.expires}: {formatDate(operation.expiresAt, language)}
+                  </span>
                 </div>
                 <div className="button-row">
                   <button
                     disabled={loading}
                     onClick={() => confirmOperation(operation.id)}
                   >
-                    Confirm
+                    {t.confirm}
                   </button>
                   <button
                     className="secondary"
                     disabled={loading}
                     onClick={() => cancelOperation(operation.id)}
                   >
-                    Cancel
+                    {t.cancel}
                   </button>
                 </div>
               </div>
@@ -544,13 +797,13 @@ export default function App() {
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Notifications</h2>
-            <p>Configure Telegram, Enterprise WeChat, or generic webhooks.</p>
+            <h2>{t.notificationTitle}</h2>
+            <p>{t.notificationHelp}</p>
           </div>
         </div>
         <div className="notification-form">
           <label>
-            Name
+            {t.name}
             <input
               value={notificationForm.name}
               onChange={(event) =>
@@ -563,7 +816,7 @@ export default function App() {
             />
           </label>
           <label>
-            Type
+            {t.type}
             <select
               value={notificationForm.type}
               onChange={(event) =>
@@ -579,7 +832,7 @@ export default function App() {
             </select>
           </label>
           <label>
-            Webhook URL
+            {t.webhookUrl}
             <input
               value={notificationForm.url}
               onChange={(event) =>
@@ -592,7 +845,7 @@ export default function App() {
             />
           </label>
           <label>
-            Telegram chat ID
+            {t.chatId}
             <input
               value={notificationForm.chatId}
               onChange={(event) =>
@@ -608,7 +861,7 @@ export default function App() {
             disabled={loading || !notificationForm.name.trim()}
             onClick={saveNotification}
           >
-            Save channel
+            {t.saveChannel}
           </button>
         </div>
         {notifications.length > 0 && (
@@ -625,14 +878,14 @@ export default function App() {
                     disabled={loading}
                     onClick={() => testNotification(channel.id)}
                   >
-                    Test
+                    {t.test}
                   </button>
                   <button
                     className="secondary"
                     disabled={loading}
                     onClick={() => deleteNotification(channel.id)}
                   >
-                    Delete
+                    {t.delete}
                   </button>
                 </div>
               </div>
@@ -644,78 +897,17 @@ export default function App() {
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>VPS Fleet</h2>
-            <p>Realtime checks are pulled only when you click refresh.</p>
-          </div>
-          <button className="secondary" disabled={loading} onClick={reload}>
-            Reload
-          </button>
-        </div>
-
-        {servers.length === 0 ? (
-          <div className="empty">
-            No VPS registered yet. Generate an install command and run it on a
-            test VPS.
-          </div>
-        ) : (
-          <div className="server-grid">
-            {servers.map((server) => (
-              <article className="server-card" key={server.id}>
-                <div className="server-title">
-                  <div>
-                    <h3>{server.name}</h3>
-                    <p>{server.host}</p>
-                  </div>
-                  <StatusPill status={server.status} />
-                </div>
-                <Snapshot snapshot={server.lastSnapshot} />
-                <div className="server-meta">
-                  <span>ID: {server.id}</span>
-                  <span>Location: {server.location}</span>
-                  <span>Last seen: {formatDate(server.lastSeenAt)}</span>
-                </div>
-                <button
-                  disabled={loading}
-                  onClick={() => refreshServer(server.id)}
-                >
-                  Refresh this VPS
-                </button>
-                <div className="button-row">
-                  <button
-                    className="secondary"
-                    disabled={loading}
-                    onClick={() => editServer(server)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={loading}
-                    onClick={() => deleteServer(server)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>Operation Audit</h2>
-            <p>Recent web, Telegram, agent, and system actions.</p>
+            <h2>{t.audit}</h2>
+            <p>{t.auditHelp}</p>
           </div>
         </div>
         {operations.length === 0 ? (
-          <div className="empty">No operations yet.</div>
+          <div className="empty">{t.noOps}</div>
         ) : (
           <div className="log-list">
             {operations.slice(0, 20).map((operation) => (
               <div className="log-row" key={operation.id}>
-                <span>{formatDate(operation.createdAt)}</span>
+                <span>{formatDate(operation.createdAt, language)}</span>
                 <strong>{operation.action}</strong>
                 <em>{operation.source}</em>
                 <code>{operation.serverId || "-"}</code>

@@ -8,8 +8,19 @@
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  color: #132018;
-  background: #edf2e5;
+  color: #152119;
+  background:
+    radial-gradient(
+      circle at 8% 0%,
+      rgba(177, 213, 123, 0.34),
+      transparent 26rem
+    ),
+    radial-gradient(
+      circle at 90% 8%,
+      rgba(56, 104, 82, 0.18),
+      transparent 28rem
+    ),
+    #eef3e8;
 }
 
 * {
@@ -51,6 +62,11 @@ button.secondary {
   color: #173d2a;
 }
 
+button.active {
+  background: #173d2a;
+  color: #f8fff6;
+}
+
 input,
 select,
 textarea {
@@ -85,6 +101,52 @@ code {
   width: min(1280px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 2rem 0 4rem;
+}
+
+.topbar {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.4rem;
+  border: 1px solid rgba(88, 112, 75, 0.16);
+  border-radius: 32px;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 24px 80px rgba(52, 80, 47, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.topbar h1 {
+  max-width: 760px;
+  margin-bottom: 0.65rem;
+  font-size: clamp(2.3rem, 6vw, 4.7rem);
+}
+
+.topbar-actions {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 180px;
+}
+
+.language-switch {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: rgba(219, 231, 207, 0.78);
+}
+
+.language-switch button {
+  flex: 1;
+  padding: 0.55rem 0.8rem;
+}
+
+.floating-switch {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2;
 }
 
 .hero {
@@ -176,6 +238,50 @@ h3 {
   color: #173d2a;
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.metric-card {
+  padding: 1.1rem;
+  border: 1px solid rgba(88, 112, 75, 0.16);
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 14px 36px rgba(52, 80, 47, 0.09);
+}
+
+.metric-card span {
+  display: block;
+  font-size: 2.45rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.metric-card p {
+  margin: 0.35rem 0 0;
+  color: #607057;
+  font-weight: 800;
+}
+
+.metric-card.good {
+  background: linear-gradient(
+    135deg,
+    rgba(212, 247, 199, 0.86),
+    rgba(255, 255, 255, 0.78)
+  );
+}
+
+.metric-card.warn {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 240, 189, 0.9),
+    rgba(255, 255, 255, 0.78)
+  );
+}
+
 .small-button {
   width: 100%;
   margin-top: 1rem;
@@ -212,6 +318,10 @@ h3 {
   gap: 1rem;
   padding: 1.2rem;
   margin-top: 1rem;
+}
+
+.fleet-panel {
+  padding: 1.35rem;
 }
 
 .panel-header {
@@ -280,7 +390,15 @@ h3 {
 .server-card {
   display: grid;
   gap: 1rem;
-  padding: 1rem;
+  padding: 1.05rem;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.server-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 24px 64px rgba(52, 80, 47, 0.14);
 }
 
 .server-title {
@@ -443,9 +561,18 @@ h3 {
 }
 
 @media (max-width: 820px) {
+  .topbar,
   .hero,
   .grid.two {
     grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    flex-direction: column;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .panel-header,
@@ -458,6 +585,12 @@ h3 {
   }
 
   .notification-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .metric-grid {
     grid-template-columns: 1fr;
   }
 }

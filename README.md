@@ -94,6 +94,15 @@ The generated command looks like:
 curl -fsSL "https://<worker-host>/install.sh?token=<install-token>" | sudo bash
 ```
 
+The installer starts the agent with systemd when available. In lightweight VPS,
+container, or chroot environments without systemd, it falls back to a background
+runner and writes `/opt/edgebutler/agent.pid` and `/opt/edgebutler/agent.log`.
+
+The current refresh path requires the Cloudflare Worker to reach the agent's
+HTTP port from the public internet. VPS environments that block inbound ports
+can still register through outbound HTTPS, but on-demand refresh needs an
+allowed inbound port, a tunnel, or a future reverse-polling agent mode.
+
 ## Supported Actions
 
 - `server_summary`

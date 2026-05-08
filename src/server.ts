@@ -583,8 +583,11 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     const serverToken = randomId("agent");
     const username =
       safeString(input.username) || installToken.username || "root";
+    const reportedLocation = safeString(input.location);
     const location =
-      safeString(input.location) || installToken.location || "unknown";
+      reportedLocation && reportedLocation !== "unknown"
+        ? reportedLocation
+        : installToken.location || "unknown";
     const name = inferServerName({
       username,
       location,
@@ -1211,6 +1214,9 @@ ENDPOINT="${origin}"
 INSTALL_TOKEN="${token}"
 INSTALL_DIR="/opt/edgebutler"
 SERVICE_FILE="/etc/systemd/system/edgebutler-agent.service"
+RUNNER_FILE="$INSTALL_DIR/run-agent.sh"
+PID_FILE="$INSTALL_DIR/agent.pid"
+LOG_FILE="$INSTALL_DIR/agent.log"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run as root or with sudo."
@@ -1234,6 +1240,17 @@ EOF
 python3 -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip flask requests
 
+cat > "$RUNNER_FILE" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+INSTALL_DIR="/opt/edgebutler"
+set -a
+. "$INSTALL_DIR/config.env"
+set +a
+exec "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/agent.py"
+EOF
+chmod +x "$RUNNER_FILE"
+
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=EdgeButler Agent
@@ -1244,7 +1261,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/config.env
-ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/agent.py
+ExecStart=$RUNNER_FILE
 Restart=always
 RestartSec=5
 
@@ -1252,9 +1269,18 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable --now edgebutler-agent
-echo "EdgeButler agent installed."
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  systemctl daemon-reload
+  systemctl enable --now edgebutler-agent
+  echo "EdgeButler agent installed and started with systemd."
+else
+  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
+    kill "$(cat "$PID_FILE")" || true
+  fi
+  nohup "$RUNNER_FILE" > "$LOG_FILE" 2>&1 &
+  echo $! > "$PID_FILE"
+  echo "EdgeButler agent installed and started without systemd. PID: $(cat "$PID_FILE"), log: $LOG_FILE"
+fi
 `;
 }
 
@@ -1271,6 +1297,10 @@ ENDPOINT = os.environ.get("EDGEBUTLER_ENDPOINT", "").rstrip("/")
 INSTALL_TOKEN = os.environ.get("EDGEBUTLER_INSTALL_TOKEN", "")
 AGENT_TOKEN = os.environ.get("EDGEBUTLER_AGENT_TOKEN", "")
 PORT = int(os.environ.get("EDGEBUTLER_PORT", "8080"))
+
+@app.get("/health")
+def health():
+    return jsonify({"ok": True, "hostname": socket.gethostname()})
 
 ACTIONS = {
     "check_memory": "free -m",
