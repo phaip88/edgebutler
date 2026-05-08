@@ -710,7 +710,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       return `Please provide a target for ${plan.action}, such as a service name, port, process name, or shell command.`;
     }
 
-    if (MUTATING_ACTIONS.has(plan.action) && !plan.needsConfirmation) {
+    if (MUTATING_ACTIONS.has(plan.action)) {
       const pending = this.createPendingOperation(server, plan, source);
       return [
         "This operation requires confirmation before execution.",
@@ -898,15 +898,15 @@ Actions:
 - check_top_processes
 - check_port, requires target port
 - check_process, requires target process
-- restart_service, requires target service and needsConfirmation true
+- restart_service, requires target service. Set needsConfirmation false unless the user explicitly says they already confirm execution.
 - service_health, requires target service
 - server_summary
-- shell, requires command and needsConfirmation true
+- shell, requires command. Set needsConfirmation false unless the user explicitly says they already confirm execution.
 
 Return chat for missing target/server.
 JSON format for chat: {"type":"chat","text":"..."}
 JSON format for action: {"type":"action","serverId":"...","serverName":"...","action":"...","target":"...","command":"...","needsConfirmation":false}
-If the user explicitly confirms execution, set needsConfirmation true.
+For mutating actions, return an action with needsConfirmation false first so the web console can create a pending confirmation. Only set needsConfirmation true when the user explicitly confirms an existing operation.
 `;
 
     const aiResponse = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
