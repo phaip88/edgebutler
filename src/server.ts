@@ -80,6 +80,9 @@ type ActionPlan =
 type Env = {
   AI: Ai;
   EdgeButler: DurableObjectNamespace<EdgeButler>;
+  ADMIN_PASSWORD?: string;
+  ADMIN_TOKEN?: string;
+  SESSION_SECRET?: string;
   TELEGRAM_BOT_TOKEN?: string;
 };
 
@@ -96,6 +99,9 @@ const MUTATING_ACTIONS = new Set(["restart_service", "shell"]);
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8"
 };
+
+const SESSION_COOKIE = "eb_session";
+const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -118,6 +124,91 @@ function randomId(prefix: string) {
 
 function safeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function base64Url(input: ArrayBuffer | string) {
+  const bytes =
+    typeof input === "string"
+      ? new TextEncoder().encode(input)
+      : new Uint8Array(input);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function fromBase64Url(input: string) {
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(
+    normalized.length + ((4 - (normalized.length % 4)) % 4),
+    "="
+  );
+  return atob(padded);
+}
+
+function getSessionSecret(env: Env) {
+  return env.SESSION_SECRET || env.ADMIN_TOKEN || env.ADMIN_PASSWORD || "";
+}
+
+function isAuthConfigured(env: Env) {
+  return Boolean(env.ADMIN_PASSWORD || env.ADMIN_TOKEN);
+}
+
+async function hmac(secret: string, value: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  return base64Url(
+    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value))
+  );
+}
+
+async function createSession(env: Env) {
+  const payload = base64Url(
+    JSON.stringify({
+      exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+      nonce: randomId("nonce")
+    })
+  );
+  const signature = await hmac(getSessionSecret(env), payload);
+  return `${payload}.${signature}`;
+}
+
+async function verifySession(request: Request, env: Env) {
+  if (!isAuthConfigured(env)) return true;
+  const cookie = request.headers.get("Cookie") || "";
+  const session = cookie
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${SESSION_COOKIE}=`))
+    ?.slice(SESSION_COOKIE.length + 1);
+
+  if (!session) return false;
+  const [payload, signature] = session.split(".");
+  if (!payload || !signature) return false;
+  if ((await hmac(getSessionSecret(env), payload)) !== signature) return false;
+
+  try {
+    const decoded = JSON.parse(fromBase64Url(payload)) as { exp?: number };
+    return typeof decoded.exp === "number" && decoded.exp > Date.now() / 1000;
+  } catch {
+    return false;
+  }
+}
+
+function sessionCookie(value: string, request: Request) {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_SECONDS}${secure}`;
+}
+
+function clearSessionCookie() {
+  return `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
 function truncate(value: string, limit = 4000) {
@@ -615,6 +706,48 @@ function getController(env: Env) {
 async function handleApi(request: Request, env: Env) {
   const url = new URL(request.url);
   const controller = getController(env);
+
+  if (url.pathname === "/api/auth/status" && request.method === "GET") {
+    return json({
+      authenticated: await verifySession(request, env),
+      authConfigured: isAuthConfigured(env)
+    });
+  }
+
+  if (url.pathname === "/api/auth/login" && request.method === "POST") {
+    const body = await readJson(request);
+    const credential = safeString(body.password || body.token);
+    const ok =
+      credential &&
+      (credential === env.ADMIN_PASSWORD || credential === env.ADMIN_TOKEN);
+
+    if (!ok) {
+      return json({ error: "Invalid admin credential." }, { status: 401 });
+    }
+
+    return json(
+      { authenticated: true, authConfigured: isAuthConfigured(env) },
+      {
+        headers: {
+          "Set-Cookie": sessionCookie(await createSession(env), request)
+        }
+      }
+    );
+  }
+
+  if (url.pathname === "/api/auth/logout" && request.method === "POST") {
+    return json(
+      { authenticated: false, authConfigured: isAuthConfigured(env) },
+      { headers: { "Set-Cookie": clearSessionCookie() } }
+    );
+  }
+
+  if (
+    url.pathname !== "/api/agent/register" &&
+    !(await verifySession(request, env))
+  ) {
+    return json({ error: "Authentication required." }, { status: 401 });
+  }
 
   if (url.pathname === "/api/servers" && request.method === "GET") {
     return json(await controller.listServers());

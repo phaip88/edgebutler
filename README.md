@@ -58,8 +58,16 @@ npm run deploy
 Optional Telegram secret:
 
 ```bash
+npx wrangler secret put ADMIN_PASSWORD
+# or
+npx wrangler secret put ADMIN_TOKEN
+
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 ```
+
+`ADMIN_PASSWORD` or `ADMIN_TOKEN` protects the web operations API. If neither is
+configured, local development is allowed but production deployment is not
+recommended.
 
 Set the Telegram webhook after deployment:
 

@@ -44,6 +44,11 @@ type InstallTokenResponse = {
   installCommand: string;
 };
 
+type AuthStatus = {
+  authenticated: boolean;
+  authConfigured: boolean;
+};
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -92,6 +97,8 @@ function Snapshot({ snapshot }: { snapshot?: ServerSnapshot }) {
 }
 
 export default function App() {
+  const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const [password, setPassword] = useState("");
   const [servers, setServers] = useState<ManagedServer[]>([]);
   const [operations, setOperations] = useState<OperationLog[]>([]);
   const [installToken, setInstallToken] = useState<InstallTokenResponse | null>(
@@ -134,8 +141,36 @@ export default function App() {
   }
 
   useEffect(() => {
-    void withLoading(reload);
+    void withLoading(async () => {
+      const status = await api<AuthStatus>("/api/auth/status");
+      setAuth(status);
+      if (status.authenticated) await reload();
+    });
   }, []);
+
+  function login() {
+    void withLoading(async () => {
+      const status = await api<AuthStatus>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ password })
+      });
+      setAuth(status);
+      setPassword("");
+      await reload();
+    });
+  }
+
+  function logout() {
+    void withLoading(async () => {
+      const status = await api<AuthStatus>("/api/auth/logout", {
+        method: "POST"
+      });
+      setAuth(status);
+      setServers([]);
+      setOperations([]);
+      setInstallToken(null);
+    });
+  }
 
   function createInstallToken() {
     void withLoading(async () => {
@@ -182,6 +217,49 @@ export default function App() {
     });
   }
 
+  if (!auth?.authenticated) {
+    return (
+      <main className="shell auth-shell">
+        <section className="hero auth-hero">
+          <div>
+            <p className="eyebrow">EdgeButler</p>
+            <h1>Admin Login</h1>
+            <p className="lead">
+              Enter the admin password or token configured in Cloudflare
+              secrets.
+            </p>
+          </div>
+        </section>
+
+        {error && <div className="alert">{error}</div>}
+
+        <section className="panel auth-panel">
+          {!auth?.authConfigured && (
+            <div className="alert">
+              No admin secret is configured. Set ADMIN_PASSWORD or ADMIN_TOKEN
+              before production deployment.
+            </div>
+          )}
+          <label>
+            Admin credential
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") login();
+              }}
+              placeholder="ADMIN_PASSWORD or ADMIN_TOKEN"
+            />
+          </label>
+          <button disabled={loading || !password.trim()} onClick={login}>
+            Sign in
+          </button>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="shell">
       <section className="hero">
@@ -197,6 +275,9 @@ export default function App() {
           <span>{servers.length}</span>
           <p>Total VPS</p>
           <strong>{onlineCount} online</strong>
+          <button className="secondary small-button" onClick={logout}>
+            Sign out
+          </button>
         </div>
       </section>
 
@@ -276,7 +357,7 @@ export default function App() {
           <textarea
             value={aiCommand}
             onChange={(event) => setAiCommand(event.target.value)}
-            placeholder="显示香港机 nginx 服务运行现状"
+            placeholder="Show nginx service health on Hong Kong VPS"
           />
           <div className="button-row">
             <button
