@@ -304,6 +304,19 @@ export default function App() {
     () => servers.filter((server) => server.status === "online").length,
     [servers]
   );
+  const offlineCount = useMemo(
+    () => servers.filter((server) => server.status === "offline").length,
+    [servers]
+  );
+  const newestSnapshot = useMemo(
+    () =>
+      servers
+        .map((server) => server.lastSnapshot?.collectedAt)
+        .filter(Boolean)
+        .sort()
+        .at(-1),
+    [servers]
+  );
 
   async function reload() {
     const [serverData, operationData, pendingData, notificationData] =
@@ -568,404 +581,433 @@ export default function App() {
 
   return (
     <main className="shell">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">EdgeButler</p>
-          <h1>{t.title}</h1>
-          <p className="lead">{t.lead}</p>
-        </div>
-        <div className="topbar-actions">
-          <div className="language-switch">
-            <button
-              className={language === "zh" ? "active" : "secondary"}
-              onClick={() => changeLanguage("zh")}
-            >
-              中文
-            </button>
-            <button
-              className={language === "en" ? "active" : "secondary"}
-              onClick={() => changeLanguage("en")}
-            >
-              EN
-            </button>
-          </div>
-          <button className="secondary" onClick={logout}>
-            {t.signOut}
-          </button>
-        </div>
-      </header>
-
-      <section className="metric-grid">
-        <div className="metric-card">
-          <span>{servers.length}</span>
-          <p>{t.totalVps}</p>
-        </div>
-        <div className="metric-card good">
-          <span>{onlineCount}</span>
-          <p>{t.online}</p>
-        </div>
-        <div className="metric-card warn">
-          <span>{pendingOperations.length}</span>
-          <p>{t.pending}</p>
-        </div>
-        <div className="metric-card">
-          <span>{notifications.length}</span>
-          <p>{t.notifications}</p>
-        </div>
-      </section>
-
-      {error && <div className="alert">{error}</div>}
-
-      <section className="panel fleet-panel">
-        <div className="panel-header">
-          <div>
-            <h2>{t.fleet}</h2>
-            <p>{t.fleetHelp}</p>
-          </div>
-          <div className="button-row">
-            <button className="secondary" disabled={loading} onClick={reload}>
-              {t.reload}
-            </button>
-            <button
-              className="secondary"
-              disabled={loading}
-              onClick={refreshAll}
-            >
-              {t.refreshAll}
-            </button>
-          </div>
-        </div>
-
-        {servers.length === 0 ? (
-          <div className="empty">{t.noVps}</div>
-        ) : (
-          <div className="server-grid">
-            {servers.map((server) => (
-              <article className="server-card" key={server.id}>
-                <div className="server-title">
-                  <div>
-                    <h3>{server.name}</h3>
-                    <p>{server.host}</p>
-                  </div>
-                  <StatusPill status={server.status} language={language} />
-                </div>
-                <Snapshot snapshot={server.lastSnapshot} language={language} />
-                <div className="server-meta">
-                  <span>ID: {server.id}</span>
-                  <span>
-                    {t.location}: {server.location}
-                  </span>
-                  <span>
-                    {t.lastSeen}: {formatDate(server.lastSeenAt, language)}
-                  </span>
-                </div>
-                <div className="button-row">
-                  <button
-                    disabled={loading}
-                    onClick={() => refreshServer(server.id)}
-                  >
-                    {t.refreshOne}
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={loading}
-                    onClick={() => editServer(server)}
-                  >
-                    {t.edit}
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={loading}
-                    onClick={() => deleteServer(server)}
-                  >
-                    {t.delete}
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="grid two">
-        <div className="panel">
-          <div className="panel-header">
+      <div className="ops-layout">
+        <aside className="nav-rail">
+          <div className="brand-mark">EB</div>
+          <a href="#fleet">{t.fleet}</a>
+          <a href="#ai">{t.aiOps}</a>
+          <a href="#install">{t.addVps}</a>
+          <a href="#notifications">{t.notificationTitle}</a>
+          <a href="#audit">{t.audit}</a>
+        </aside>
+        <div className="workspace">
+          <header className="topbar">
             <div>
-              <h2>{t.addVps}</h2>
-              <p>{t.addVpsHelp}</p>
+              <p className="eyebrow">EdgeButler / VPS Ops</p>
+              <h1>{t.title}</h1>
+              <p className="lead">{t.lead}</p>
+              <div className="topbar-meta">
+                <span>Agent polling mode</span>
+                <span>
+                  {t.lastSeen}: {formatDate(newestSnapshot, language)}
+                </span>
+              </div>
             </div>
-          </div>
-          <label>
-            {t.customName}
-            <input
-              value={installForm.name}
-              onChange={(event) =>
-                setInstallForm((current) => ({
-                  ...current,
-                  name: event.target.value
-                }))
-              }
-              placeholder="Hong Kong proxy 01"
-            />
-          </label>
-          <label>
-            {t.username}
-            <input
-              value={installForm.username}
-              onChange={(event) =>
-                setInstallForm((current) => ({
-                  ...current,
-                  username: event.target.value
-                }))
-              }
-              placeholder="root"
-            />
-          </label>
-          <label>
-            {t.location}
-            <input
-              value={installForm.location}
-              onChange={(event) =>
-                setInstallForm((current) => ({
-                  ...current,
-                  location: event.target.value
-                }))
-              }
-              placeholder="Hong Kong"
-            />
-          </label>
-          <button disabled={loading} onClick={createInstallToken}>
-            {t.generateInstall}
-          </button>
-          {installToken && (
-            <div className="command-box">
+            <div className="topbar-actions">
+              <div className="language-switch">
+                <button
+                  className={language === "zh" ? "active" : "secondary"}
+                  onClick={() => changeLanguage("zh")}
+                >
+                  中文
+                </button>
+                <button
+                  className={language === "en" ? "active" : "secondary"}
+                  onClick={() => changeLanguage("en")}
+                >
+                  EN
+                </button>
+              </div>
+              <button className="secondary" onClick={logout}>
+                {t.signOut}
+              </button>
+            </div>
+          </header>
+
+          <section className="metric-grid">
+            <div className="metric-card">
+              <span>{servers.length}</span>
+              <p>{t.totalVps}</p>
+            </div>
+            <div className="metric-card good">
+              <span>{onlineCount}</span>
+              <p>{t.online}</p>
+            </div>
+            <div className="metric-card danger">
+              <span>{offlineCount}</span>
+              <p>Offline</p>
+            </div>
+            <div className="metric-card warn">
+              <span>{pendingOperations.length}</span>
+              <p>{t.pending}</p>
+            </div>
+            <div className="metric-card">
+              <span>{notifications.length}</span>
+              <p>{t.notifications}</p>
+            </div>
+          </section>
+
+          {error && <div className="alert">{error}</div>}
+
+          <section className="panel fleet-panel" id="fleet">
+            <div className="panel-header">
               <div>
-                <strong>{t.expires}</strong>
-                <span>{formatDate(installToken.expiresAt, language)}</span>
+                <h2>{t.fleet}</h2>
+                <p>{t.fleetHelp}</p>
               </div>
-              <pre>{installToken.installCommand}</pre>
+              <div className="button-row">
+                <button
+                  className="secondary"
+                  disabled={loading}
+                  onClick={reload}
+                >
+                  {t.reload}
+                </button>
+                <button
+                  className="secondary"
+                  disabled={loading}
+                  onClick={refreshAll}
+                >
+                  {t.refreshAll}
+                </button>
+              </div>
             </div>
-          )}
-        </div>
 
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>{t.aiOps}</h2>
-              <p>{t.aiOpsHelp}</p>
-            </div>
-          </div>
-          <textarea
-            value={aiCommand}
-            onChange={(event) => setAiCommand(event.target.value)}
-            placeholder="Show nginx service health on Hong Kong VPS"
-          />
-          <div className="button-row">
-            <button
-              disabled={loading || !aiCommand.trim()}
-              onClick={runAiCommand}
-            >
-              {t.runAi}
-            </button>
-            <button
-              className="secondary"
-              disabled={loading}
-              onClick={refreshAll}
-            >
-              {t.refreshAll}
-            </button>
-          </div>
-          {aiOutput && <pre className="output">{aiOutput}</pre>}
-        </div>
-      </section>
+            {servers.length === 0 ? (
+              <div className="empty">{t.noVps}</div>
+            ) : (
+              <div className="server-grid">
+                {servers.map((server) => (
+                  <article className="server-card" key={server.id}>
+                    <div className="server-title">
+                      <div>
+                        <h3>{server.name}</h3>
+                        <p>{server.host}</p>
+                      </div>
+                      <StatusPill status={server.status} language={language} />
+                    </div>
+                    <Snapshot
+                      snapshot={server.lastSnapshot}
+                      language={language}
+                    />
+                    <div className="server-meta">
+                      <span>ID: {server.id}</span>
+                      <span>
+                        {t.location}: {server.location}
+                      </span>
+                      <span>
+                        {t.lastSeen}: {formatDate(server.lastSeenAt, language)}
+                      </span>
+                    </div>
+                    <div className="button-row">
+                      <button
+                        disabled={loading}
+                        onClick={() => refreshServer(server.id)}
+                      >
+                        {t.refreshOne}
+                      </button>
+                      <button
+                        className="secondary"
+                        disabled={loading}
+                        onClick={() => editServer(server)}
+                      >
+                        {t.edit}
+                      </button>
+                      <button
+                        className="secondary"
+                        disabled={loading}
+                        onClick={() => deleteServer(server)}
+                      >
+                        {t.delete}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
-      {pendingOperations.length > 0 && (
-        <section className="panel danger-panel">
-          <div className="panel-header">
-            <div>
-              <h2>{t.pendingTitle}</h2>
-              <p>{t.pendingHelp}</p>
-            </div>
-          </div>
-          <div className="pending-list">
-            {pendingOperations.map((operation) => (
-              <div className="pending-row" key={operation.id}>
+          <section className="grid two">
+            <div className="panel" id="install">
+              <div className="panel-header">
                 <div>
-                  <strong>{operation.action}</strong>
-                  <p>
-                    {operation.serverName} /{" "}
-                    {operation.command || operation.target || "no target"}
-                  </p>
-                  <span>
-                    {t.expires}: {formatDate(operation.expiresAt, language)}
-                  </span>
-                </div>
-                <div className="button-row">
-                  <button
-                    disabled={loading}
-                    onClick={() => confirmOperation(operation.id)}
-                  >
-                    {t.confirm}
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={loading}
-                    onClick={() => cancelOperation(operation.id)}
-                  >
-                    {t.cancel}
-                  </button>
+                  <h2>{t.addVps}</h2>
+                  <p>{t.addVpsHelp}</p>
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+              <label>
+                {t.customName}
+                <input
+                  value={installForm.name}
+                  onChange={(event) =>
+                    setInstallForm((current) => ({
+                      ...current,
+                      name: event.target.value
+                    }))
+                  }
+                  placeholder="Hong Kong proxy 01"
+                />
+              </label>
+              <label>
+                {t.username}
+                <input
+                  value={installForm.username}
+                  onChange={(event) =>
+                    setInstallForm((current) => ({
+                      ...current,
+                      username: event.target.value
+                    }))
+                  }
+                  placeholder="root"
+                />
+              </label>
+              <label>
+                {t.location}
+                <input
+                  value={installForm.location}
+                  onChange={(event) =>
+                    setInstallForm((current) => ({
+                      ...current,
+                      location: event.target.value
+                    }))
+                  }
+                  placeholder="Hong Kong"
+                />
+              </label>
+              <button disabled={loading} onClick={createInstallToken}>
+                {t.generateInstall}
+              </button>
+              {installToken && (
+                <div className="command-box">
+                  <div>
+                    <strong>{t.expires}</strong>
+                    <span>{formatDate(installToken.expiresAt, language)}</span>
+                  </div>
+                  <pre>{installToken.installCommand}</pre>
+                </div>
+              )}
+            </div>
 
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>{t.notificationTitle}</h2>
-            <p>{t.notificationHelp}</p>
-          </div>
-        </div>
-        <div className="notification-form">
-          <label>
-            {t.name}
-            <input
-              value={notificationForm.name}
-              onChange={(event) =>
-                setNotificationForm((current) => ({
-                  ...current,
-                  name: event.target.value
-                }))
-              }
-              placeholder="Ops WeCom"
-            />
-          </label>
-          <label>
-            {t.type}
-            <select
-              value={notificationForm.type}
-              onChange={(event) =>
-                setNotificationForm((current) => ({
-                  ...current,
-                  type: event.target.value as NotificationChannel["type"]
-                }))
-              }
-            >
-              <option value="wecom">Enterprise WeChat</option>
-              <option value="telegram">Telegram</option>
-              <option value="generic_webhook">Generic webhook</option>
-            </select>
-          </label>
-          <label>
-            {t.webhookUrl}
-            <input
-              value={notificationForm.url}
-              onChange={(event) =>
-                setNotificationForm((current) => ({
-                  ...current,
-                  url: event.target.value
-                }))
-              }
-              placeholder="https://..."
-            />
-          </label>
-          {notificationForm.type === "telegram" && (
-            <label>
-              {t.botToken}
-              <input
-                type="password"
-                value={notificationForm.botToken}
-                onChange={(event) =>
-                  setNotificationForm((current) => ({
-                    ...current,
-                    botToken: event.target.value
-                  }))
-                }
-                placeholder="123456:ABC..."
+            <div className="panel" id="ai">
+              <div className="panel-header">
+                <div>
+                  <h2>{t.aiOps}</h2>
+                  <p>{t.aiOpsHelp}</p>
+                </div>
+              </div>
+              <textarea
+                value={aiCommand}
+                onChange={(event) => setAiCommand(event.target.value)}
+                placeholder="Show nginx service health on Hong Kong VPS"
               />
-            </label>
-          )}
-          <label>
-            {t.chatId}
-            <input
-              value={notificationForm.chatId}
-              onChange={(event) =>
-                setNotificationForm((current) => ({
-                  ...current,
-                  chatId: event.target.value
-                }))
-              }
-              placeholder="Only for Telegram"
-            />
-          </label>
-          <button
-            disabled={loading || !notificationForm.name.trim()}
-            onClick={saveNotification}
-          >
-            {t.saveChannel}
-          </button>
-          <button
-            className="secondary"
-            disabled={loading || !notificationForm.name.trim()}
-            onClick={saveAndTestNotification}
-          >
-            {t.saveAndTest}
-          </button>
-        </div>
-        {notifications.length > 0 && (
-          <div className="channel-list">
-            {notifications.map((channel) => (
-              <div className="channel-row" key={channel.id}>
-                <div>
-                  <strong>{channel.name}</strong>
-                  <p>{channel.type}</p>
-                </div>
-                <div className="button-row">
-                  <button
-                    className="secondary"
-                    disabled={loading}
-                    onClick={() => testNotification(channel.id)}
-                  >
-                    {t.test}
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={loading}
-                    onClick={() => deleteNotification(channel.id)}
-                  >
-                    {t.delete}
-                  </button>
-                </div>
+              <div className="button-row">
+                <button
+                  disabled={loading || !aiCommand.trim()}
+                  onClick={runAiCommand}
+                >
+                  {t.runAi}
+                </button>
+                <button
+                  className="secondary"
+                  disabled={loading}
+                  onClick={refreshAll}
+                >
+                  {t.refreshAll}
+                </button>
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+              {aiOutput && <pre className="output">{aiOutput}</pre>}
+            </div>
+          </section>
 
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>{t.audit}</h2>
-            <p>{t.auditHelp}</p>
-          </div>
-        </div>
-        {operations.length === 0 ? (
-          <div className="empty">{t.noOps}</div>
-        ) : (
-          <div className="log-list">
-            {operations.slice(0, 20).map((operation) => (
-              <div className="log-row" key={operation.id}>
-                <span>{formatDate(operation.createdAt, language)}</span>
-                <strong>{operation.action}</strong>
-                <em>{operation.source}</em>
-                <code>{operation.serverId || "-"}</code>
+          {pendingOperations.length > 0 && (
+            <section className="panel danger-panel">
+              <div className="panel-header">
+                <div>
+                  <h2>{t.pendingTitle}</h2>
+                  <p>{t.pendingHelp}</p>
+                </div>
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+              <div className="pending-list">
+                {pendingOperations.map((operation) => (
+                  <div className="pending-row" key={operation.id}>
+                    <div>
+                      <strong>{operation.action}</strong>
+                      <p>
+                        {operation.serverName} /{" "}
+                        {operation.command || operation.target || "no target"}
+                      </p>
+                      <span>
+                        {t.expires}: {formatDate(operation.expiresAt, language)}
+                      </span>
+                    </div>
+                    <div className="button-row">
+                      <button
+                        disabled={loading}
+                        onClick={() => confirmOperation(operation.id)}
+                      >
+                        {t.confirm}
+                      </button>
+                      <button
+                        className="secondary"
+                        disabled={loading}
+                        onClick={() => cancelOperation(operation.id)}
+                      >
+                        {t.cancel}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="panel" id="notifications">
+            <div className="panel-header">
+              <div>
+                <h2>{t.notificationTitle}</h2>
+                <p>{t.notificationHelp}</p>
+              </div>
+            </div>
+            <div className="notification-form">
+              <label>
+                {t.name}
+                <input
+                  value={notificationForm.name}
+                  onChange={(event) =>
+                    setNotificationForm((current) => ({
+                      ...current,
+                      name: event.target.value
+                    }))
+                  }
+                  placeholder="Ops WeCom"
+                />
+              </label>
+              <label>
+                {t.type}
+                <select
+                  value={notificationForm.type}
+                  onChange={(event) =>
+                    setNotificationForm((current) => ({
+                      ...current,
+                      type: event.target.value as NotificationChannel["type"]
+                    }))
+                  }
+                >
+                  <option value="wecom">Enterprise WeChat</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="generic_webhook">Generic webhook</option>
+                </select>
+              </label>
+              <label>
+                {t.webhookUrl}
+                <input
+                  value={notificationForm.url}
+                  onChange={(event) =>
+                    setNotificationForm((current) => ({
+                      ...current,
+                      url: event.target.value
+                    }))
+                  }
+                  placeholder="https://..."
+                />
+              </label>
+              {notificationForm.type === "telegram" && (
+                <label>
+                  {t.botToken}
+                  <input
+                    type="password"
+                    value={notificationForm.botToken}
+                    onChange={(event) =>
+                      setNotificationForm((current) => ({
+                        ...current,
+                        botToken: event.target.value
+                      }))
+                    }
+                    placeholder="123456:ABC..."
+                  />
+                </label>
+              )}
+              <label>
+                {t.chatId}
+                <input
+                  value={notificationForm.chatId}
+                  onChange={(event) =>
+                    setNotificationForm((current) => ({
+                      ...current,
+                      chatId: event.target.value
+                    }))
+                  }
+                  placeholder="Only for Telegram"
+                />
+              </label>
+              <button
+                disabled={loading || !notificationForm.name.trim()}
+                onClick={saveNotification}
+              >
+                {t.saveChannel}
+              </button>
+              <button
+                className="secondary"
+                disabled={loading || !notificationForm.name.trim()}
+                onClick={saveAndTestNotification}
+              >
+                {t.saveAndTest}
+              </button>
+            </div>
+            {notifications.length > 0 && (
+              <div className="channel-list">
+                {notifications.map((channel) => (
+                  <div className="channel-row" key={channel.id}>
+                    <div>
+                      <strong>{channel.name}</strong>
+                      <p>{channel.type}</p>
+                    </div>
+                    <div className="button-row">
+                      <button
+                        className="secondary"
+                        disabled={loading}
+                        onClick={() => testNotification(channel.id)}
+                      >
+                        {t.test}
+                      </button>
+                      <button
+                        className="secondary"
+                        disabled={loading}
+                        onClick={() => deleteNotification(channel.id)}
+                      >
+                        {t.delete}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="panel" id="audit">
+            <div className="panel-header">
+              <div>
+                <h2>{t.audit}</h2>
+                <p>{t.auditHelp}</p>
+              </div>
+            </div>
+            {operations.length === 0 ? (
+              <div className="empty">{t.noOps}</div>
+            ) : (
+              <div className="log-list">
+                {operations.slice(0, 20).map((operation) => (
+                  <div className="log-row" key={operation.id}>
+                    <span>{formatDate(operation.createdAt, language)}</span>
+                    <strong>{operation.action}</strong>
+                    <em>{operation.source}</em>
+                    <code>{operation.serverId || "-"}</code>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
     </main>
   );
 }

@@ -139,6 +139,12 @@ const ACTIONS_REQUIRING_TARGET = new Set([
 ]);
 
 const MUTATING_ACTIONS = new Set(["restart_service", "shell"]);
+const ACTION_ALIASES: Record<string, string> = {
+  check_system_status: "server_summary",
+  system_status: "server_summary",
+  status: "server_summary",
+  summary: "server_summary"
+};
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8"
@@ -827,6 +833,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
 
     const plan = await this.plan(trimmed);
     if (plan.type === "chat") return `[EdgeButler] ${plan.text}`;
+    plan.action = this.normalizeAction(plan.action);
 
     const server = this.resolveServer(plan.serverId, plan.serverName);
     if (!server) {
@@ -1062,6 +1069,10 @@ For mutating actions, return an action with needsConfirmation false first so the
         text: `AI 指令解析失败，请换一种说法。原始输出: ${text}`
       };
     }
+  }
+
+  private normalizeAction(action: string) {
+    return ACTION_ALIASES[action] || action;
   }
 
   private async summarize(

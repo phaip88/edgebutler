@@ -98,9 +98,60 @@ code {
 }
 
 .shell {
-  width: min(1280px, calc(100vw - 32px));
+  width: min(1480px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 2rem 0 4rem;
+}
+
+.ops-layout {
+  display: grid;
+  grid-template-columns: 172px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.workspace {
+  min-width: 0;
+}
+
+.nav-rail {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem;
+  border: 1px solid rgba(88, 112, 75, 0.16);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 18px 50px rgba(52, 80, 47, 0.1);
+  backdrop-filter: blur(14px);
+}
+
+.brand-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 0.4rem;
+  place-items: center;
+  border-radius: 16px;
+  background: #173d2a;
+  color: #f8fff6;
+  font-weight: 950;
+  letter-spacing: -0.08em;
+}
+
+.nav-rail a {
+  padding: 0.72rem 0.8rem;
+  border-radius: 16px;
+  color: #506246;
+  font-size: 0.92rem;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.nav-rail a:hover {
+  background: #eef6e7;
+  color: #173d2a;
 }
 
 .topbar {
@@ -120,6 +171,22 @@ code {
   max-width: 760px;
   margin-bottom: 0.65rem;
   font-size: clamp(2.3rem, 6vw, 4.7rem);
+}
+
+.topbar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+
+.topbar-meta span {
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(23, 61, 42, 0.08);
+  color: #40513a;
+  font-size: 0.82rem;
+  font-weight: 850;
 }
 
 .topbar-actions {
@@ -240,7 +307,7 @@ h3 {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1rem;
   margin-top: 1rem;
 }
@@ -278,6 +345,14 @@ h3 {
   background: linear-gradient(
     135deg,
     rgba(255, 240, 189, 0.9),
+    rgba(255, 255, 255, 0.78)
+  );
+}
+
+.metric-card.danger {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 224, 218, 0.9),
     rgba(255, 255, 255, 0.78)
   );
 }
@@ -561,10 +636,16 @@ h3 {
 }
 
 @media (max-width: 820px) {
+  .ops-layout,
   .topbar,
   .hero,
   .grid.two {
     grid-template-columns: 1fr;
+  }
+
+  .nav-rail {
+    position: static;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .topbar {
@@ -590,6 +671,10 @@ h3 {
 }
 
 @media (max-width: 520px) {
+  .nav-rail {
+    grid-template-columns: 1fr;
+  }
+
   .metric-grid {
     grid-template-columns: 1fr;
   }
