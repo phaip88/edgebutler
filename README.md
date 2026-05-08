@@ -16,6 +16,7 @@ operations platform.
 - On-demand single VPS refresh.
 - On-demand all VPS refresh.
 - AI command endpoint for natural-language operations.
+- Pending confirmation queue for mutating operations.
 - Telegram webhook entrypoint.
 - Operation audit log stored in the controller Agent state.
 - D1 schema draft in `migrations/0001_initial.sql` for the next persistence step.
@@ -107,7 +108,8 @@ curl -fsSL "https://<worker-host>/install.sh?token=<install-token>" | sudo bash
 - `shell`
 
 Mutating operations such as `restart_service` and `shell` are designed to require
-explicit confirmation in the AI command flow.
+explicit confirmation. The AI command flow creates a pending operation, and the
+web console must confirm it before execution.
 
 ## Notes
 

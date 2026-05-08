@@ -57,12 +57,25 @@ type OperationLog = {
   createdAt: string;
 };
 
+type PendingOperation = {
+  id: string;
+  serverId: string;
+  serverName: string;
+  source: "web" | "telegram";
+  action: string;
+  target?: string;
+  command?: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
 type EdgeButlerState = {
   rules: string;
   history: ChatMessage[];
   servers: ManagedServer[];
   installTokens: InstallToken[];
   operationLogs: OperationLog[];
+  pendingOperations: PendingOperation[];
 };
 
 type ActionPlan =
@@ -268,7 +281,8 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     history: [],
     servers: [],
     installTokens: [],
-    operationLogs: []
+    operationLogs: [],
+    pendingOperations: []
   };
 
   private get data() {
@@ -278,6 +292,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       servers: this.state?.servers || [],
       installTokens: this.state?.installTokens || [],
       operationLogs: this.state?.operationLogs || [],
+      pendingOperations: this.state?.pendingOperations || [],
       history: this.state?.history || []
     };
   }
@@ -310,6 +325,17 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   @callable()
   async listOperations() {
     return this.data.operationLogs.slice(0, 100);
+  }
+
+  @callable()
+  async listPendingOperations() {
+    const pendingOperations = this.data.pendingOperations.filter(
+      (item) => Date.parse(item.expiresAt) > Date.now()
+    );
+    if (pendingOperations.length !== this.data.pendingOperations.length) {
+      this.save({ pendingOperations });
+    }
+    return pendingOperations;
   }
 
   @callable()
@@ -475,12 +501,12 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   @callable()
   async run(command: string, source: "web" | "telegram" = "web") {
     const trimmed = command.trim();
-    if (!trimmed) return "请输入运维指令。";
+    if (!trimmed) return "Please enter an operations command.";
 
-    if (trimmed.startsWith("规则:")) {
-      const rules = trimmed.replace("规则:", "").trim();
+    if (trimmed.startsWith("rules:")) {
+      const rules = trimmed.replace("rules:", "").trim();
       this.save({ rules });
-      return `[系统] 规则已更新: ${rules}`;
+      return `[System] Rules updated: ${rules}`;
     }
 
     const plan = await this.plan(trimmed);
@@ -488,7 +514,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
 
     const server = this.resolveServer(plan.serverId, plan.serverName);
     if (!server) {
-      return "请指定要操作的 VPS。你可以使用服务器名称、ID，或先在页面端添加服务器。";
+      return "Please specify the VPS to operate on. Use a server name, ID, or add a server from the web console first.";
     }
 
     if (
@@ -496,42 +522,143 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       !plan.target &&
       !plan.command
     ) {
-      return `请明确 ${plan.action} 的目标，例如服务名、端口、进程名或 shell 命令。`;
+      return `Please provide a target for ${plan.action}, such as a service name, port, process name, or shell command.`;
     }
 
     if (MUTATING_ACTIONS.has(plan.action) && !plan.needsConfirmation) {
+      const pending = this.createPendingOperation(server, plan, source);
       return [
-        "该操作可能修改服务器状态，需要二次确认。",
-        `服务器: ${server.name}`,
-        `动作: ${plan.action}`,
-        plan.command ? `命令: ${plan.command}` : `目标: ${plan.target || ""}`,
-        "请在页面端确认后执行，或回复包含“确认执行”的明确指令。"
+        "This operation requires confirmation before execution.",
+        `Confirmation ID: ${pending.id}`,
+        `Server: ${server.name}`,
+        `Action: ${plan.action}`,
+        plan.command
+          ? `Command: ${plan.command}`
+          : `Target: ${plan.target || ""}`,
+        "Confirm it from the web console."
       ].join("\n");
     }
 
-    const result = await this.callAgent(
+    return await this.executeOperation({
       server,
-      plan.action,
-      plan.target,
-      plan.command
-    );
-    const rawOutput = truncate(
-      result.stdout || result.stderr || "命令执行完成，但没有输出。"
-    );
-    const summary = await this.summarize(plan.action, plan.target, rawOutput);
+      action: plan.action,
+      target: plan.target,
+      command: plan.command,
+      source
+    });
+  }
 
+  @callable()
+  async confirmOperation(operationId: string) {
+    const pending = this.data.pendingOperations.find(
+      (item) => item.id === operationId
+    );
+    if (!pending) throw new Error("Pending operation not found.");
+    if (Date.parse(pending.expiresAt) < Date.now()) {
+      this.save({
+        pendingOperations: this.data.pendingOperations.filter(
+          (item) => item.id !== operationId
+        )
+      });
+      throw new Error("Pending operation has expired.");
+    }
+
+    const server = this.data.servers.find(
+      (item) => item.id === pending.serverId
+    );
+    if (!server) throw new Error("Server not found.");
+
+    this.save({
+      pendingOperations: this.data.pendingOperations.filter(
+        (item) => item.id !== operationId
+      )
+    });
+
+    return await this.executeOperation({
+      server,
+      action: pending.action,
+      target: pending.target,
+      command: pending.command,
+      source: pending.source
+    });
+  }
+
+  @callable()
+  async cancelOperation(operationId: string) {
+    this.save({
+      pendingOperations: this.data.pendingOperations.filter(
+        (item) => item.id !== operationId
+      )
+    });
     this.appendLog({
+      source: "web",
+      action: "cancel_pending_operation",
+      target: operationId
+    });
+    return { ok: true };
+  }
+
+  private createPendingOperation(
+    server: ManagedServer,
+    plan: Extract<ActionPlan, { type: "action" }>,
+    source: "web" | "telegram"
+  ) {
+    const pending: PendingOperation = {
+      id: randomId("pending"),
+      serverId: server.id,
+      serverName: server.name,
       source,
       action: plan.action,
       target: plan.target,
       command: plan.command,
+      createdAt: nowIso(),
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString()
+    };
+    this.save({
+      pendingOperations: [pending, ...this.data.pendingOperations].slice(0, 50)
+    });
+    this.appendLog({
+      source,
+      action: "create_pending_operation",
+      target: pending.id,
       serverId: server.id,
+      command: plan.command
+    });
+    return pending;
+  }
+
+  private async executeOperation(input: {
+    server: ManagedServer;
+    action: string;
+    target?: string;
+    command?: string;
+    source: "web" | "telegram";
+  }) {
+    const result = await this.callAgent(
+      input.server,
+      input.action,
+      input.target,
+      input.command
+    );
+    const rawOutput = truncate(
+      result.stdout || result.stderr || "Command completed without output."
+    );
+    const summary = await this.summarize(input.action, input.target, rawOutput);
+
+    this.appendLog({
+      source: input.source,
+      action: input.action,
+      target: input.target,
+      command: input.command,
+      serverId: input.server.id,
       output: rawOutput
     });
 
-    return [`[执行动作] ${server.name} / ${plan.action}`, "", summary].join(
-      "\n"
-    );
+    return [
+      `[Operation] ${input.server.name} / ${input.action}`,
+      "",
+      summary
+    ].join("\n");
   }
 
   private resolveServer(serverId?: string, serverName?: string) {
@@ -695,10 +822,13 @@ function getController(env: Env) {
   return env.EdgeButler.get(id) as DurableObjectStub & {
     listServers(): Promise<unknown>;
     listOperations(): Promise<unknown>;
+    listPendingOperations(): Promise<unknown>;
     createInstallToken(input?: unknown): Promise<InstallToken>;
     registerServer(input: unknown): Promise<unknown>;
     refreshServer(serverId: string): Promise<unknown>;
     refreshAllServers(): Promise<unknown>;
+    confirmOperation(operationId: string): Promise<string>;
+    cancelOperation(operationId: string): Promise<unknown>;
     run(command: string, source?: "web" | "telegram"): Promise<string>;
   };
 }
@@ -757,6 +887,10 @@ async function handleApi(request: Request, env: Env) {
     return json(await controller.listOperations());
   }
 
+  if (url.pathname === "/api/pending-operations" && request.method === "GET") {
+    return json(await controller.listPendingOperations());
+  }
+
   if (url.pathname === "/api/install-token" && request.method === "POST") {
     const body = await readJson(request);
     const token = await controller.createInstallToken(body);
@@ -791,6 +925,22 @@ async function handleApi(request: Request, env: Env) {
     return json({
       text: await controller.run(safeString(body.command), "web")
     });
+  }
+
+  if (
+    url.pathname.match(/^\/api\/pending-operations\/[^/]+\/confirm$/) &&
+    request.method === "POST"
+  ) {
+    const operationId = decodeURIComponent(url.pathname.split("/")[3]);
+    return json({ text: await controller.confirmOperation(operationId) });
+  }
+
+  if (
+    url.pathname.match(/^\/api\/pending-operations\/[^/]+\/cancel$/) &&
+    request.method === "POST"
+  ) {
+    const operationId = decodeURIComponent(url.pathname.split("/")[3]);
+    return json(await controller.cancelOperation(operationId));
   }
 
   return json({ error: "Not found" }, { status: 404 });

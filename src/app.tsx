@@ -37,6 +37,18 @@ type OperationLog = {
   createdAt: string;
 };
 
+type PendingOperation = {
+  id: string;
+  serverId: string;
+  serverName: string;
+  source: "web" | "telegram";
+  action: string;
+  target?: string;
+  command?: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
 type InstallTokenResponse = {
   token: string;
   serverId: string;
@@ -101,6 +113,9 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [servers, setServers] = useState<ManagedServer[]>([]);
   const [operations, setOperations] = useState<OperationLog[]>([]);
+  const [pendingOperations, setPendingOperations] = useState<
+    PendingOperation[]
+  >([]);
   const [installToken, setInstallToken] = useState<InstallTokenResponse | null>(
     null
   );
@@ -120,12 +135,14 @@ export default function App() {
   );
 
   async function reload() {
-    const [serverData, operationData] = await Promise.all([
+    const [serverData, operationData, pendingData] = await Promise.all([
       api<ManagedServer[]>("/api/servers"),
-      api<OperationLog[]>("/api/operations")
+      api<OperationLog[]>("/api/operations"),
+      api<PendingOperation[]>("/api/pending-operations")
     ]);
     setServers(serverData);
     setOperations(operationData);
+    setPendingOperations(pendingData);
   }
 
   async function withLoading(task: () => Promise<void>) {
@@ -168,6 +185,7 @@ export default function App() {
       setAuth(status);
       setServers([]);
       setOperations([]);
+      setPendingOperations([]);
       setInstallToken(null);
     });
   }
@@ -213,6 +231,27 @@ export default function App() {
         body: JSON.stringify({ command })
       });
       setAiOutput(result.text);
+      await reload();
+    });
+  }
+
+  function confirmOperation(operationId: string) {
+    void withLoading(async () => {
+      const result = await api<{ text: string }>(
+        `/api/pending-operations/${encodeURIComponent(operationId)}/confirm`,
+        { method: "POST" }
+      );
+      setAiOutput(result.text);
+      await reload();
+    });
+  }
+
+  function cancelOperation(operationId: string) {
+    void withLoading(async () => {
+      await api(
+        `/api/pending-operations/${encodeURIComponent(operationId)}/cancel`,
+        { method: "POST" }
+      );
       await reload();
     });
   }
@@ -377,6 +416,46 @@ export default function App() {
           {aiOutput && <pre className="output">{aiOutput}</pre>}
         </div>
       </section>
+
+      {pendingOperations.length > 0 && (
+        <section className="panel danger-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Pending Confirmations</h2>
+              <p>Mutating operations expire after 10 minutes.</p>
+            </div>
+          </div>
+          <div className="pending-list">
+            {pendingOperations.map((operation) => (
+              <div className="pending-row" key={operation.id}>
+                <div>
+                  <strong>{operation.action}</strong>
+                  <p>
+                    {operation.serverName} /{" "}
+                    {operation.command || operation.target || "no target"}
+                  </p>
+                  <span>Expires: {formatDate(operation.expiresAt)}</span>
+                </div>
+                <div className="button-row">
+                  <button
+                    disabled={loading}
+                    onClick={() => confirmOperation(operation.id)}
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={loading}
+                    onClick={() => cancelOperation(operation.id)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="panel">
         <div className="panel-header">

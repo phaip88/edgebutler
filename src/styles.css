@@ -363,6 +363,36 @@ h3 {
   gap: 0.55rem;
 }
 
+.danger-panel {
+  border-color: rgba(148, 48, 28, 0.28);
+  background: rgba(255, 247, 241, 0.88);
+}
+
+.pending-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.pending-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  border-radius: 22px;
+  background: #fff0e8;
+}
+
+.pending-row p {
+  margin: 0.25rem 0;
+  color: #714439;
+}
+
+.pending-row span {
+  color: #876156;
+  font-size: 0.85rem;
+}
+
 .log-row {
   display: grid;
   grid-template-columns: 190px 1fr 90px minmax(160px, auto);
