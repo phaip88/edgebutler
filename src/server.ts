@@ -69,6 +69,17 @@ type PendingOperation = {
   expiresAt: string;
 };
 
+type NotificationChannel = {
+  id: string;
+  name: string;
+  type: "generic_webhook" | "wecom" | "telegram";
+  url?: string;
+  chatId?: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type EdgeButlerState = {
   rules: string;
   history: ChatMessage[];
@@ -76,6 +87,7 @@ type EdgeButlerState = {
   installTokens: InstallToken[];
   operationLogs: OperationLog[];
   pendingOperations: PendingOperation[];
+  notificationChannels: NotificationChannel[];
 };
 
 type ActionPlan =
@@ -282,7 +294,8 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     servers: [],
     installTokens: [],
     operationLogs: [],
-    pendingOperations: []
+    pendingOperations: [],
+    notificationChannels: []
   };
 
   private get data() {
@@ -293,6 +306,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       installTokens: this.state?.installTokens || [],
       operationLogs: this.state?.operationLogs || [],
       pendingOperations: this.state?.pendingOperations || [],
+      notificationChannels: this.state?.notificationChannels || [],
       history: this.state?.history || []
     };
   }
@@ -313,6 +327,36 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     this.save({ operationLogs });
   }
 
+  private async sendNotification(channel: NotificationChannel, text: string) {
+    if (!channel.enabled) return;
+    if (channel.type === "telegram") {
+      if (!this.env.TELEGRAM_BOT_TOKEN || !channel.chatId) {
+        throw new Error("Telegram token or chat id is missing.");
+      }
+      await sendTelegram(this.env.TELEGRAM_BOT_TOKEN, channel.chatId, text);
+      return;
+    }
+
+    if (!channel.url) throw new Error("Webhook URL is missing.");
+    if (channel.type === "wecom") {
+      await fetch(channel.url, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          msgtype: "text",
+          text: { content: text }
+        })
+      });
+      return;
+    }
+
+    await fetch(channel.url, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ text })
+    });
+  }
+
   @callable()
   async listServers() {
     return this.data.servers.map((server) => {
@@ -323,8 +367,135 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   }
 
   @callable()
+  async updateServer(
+    serverId: string,
+    input: {
+      name?: string;
+      location?: string;
+      tags?: string[];
+      agentUrl?: string;
+    }
+  ) {
+    const updatedAt = nowIso();
+    let found = false;
+    const servers = this.data.servers.map((server) => {
+      if (server.id !== serverId) return server;
+      found = true;
+      const name = safeString(input.name) || server.name;
+      return {
+        ...server,
+        name,
+        customName: name,
+        location: safeString(input.location) || server.location,
+        tags: Array.isArray(input.tags) ? input.tags.map(String) : server.tags,
+        agentUrl: safeString(input.agentUrl) || server.agentUrl,
+        updatedAt
+      };
+    });
+    if (!found) throw new Error("Server not found.");
+    this.save({ servers });
+    this.appendLog({
+      source: "web",
+      action: "update_server",
+      serverId
+    });
+    return servers.find((server) => server.id === serverId);
+  }
+
+  @callable()
+  async deleteServer(serverId: string) {
+    const server = this.data.servers.find((item) => item.id === serverId);
+    if (!server) throw new Error("Server not found.");
+    this.save({
+      servers: this.data.servers.filter((item) => item.id !== serverId),
+      pendingOperations: this.data.pendingOperations.filter(
+        (item) => item.serverId !== serverId
+      )
+    });
+    this.appendLog({
+      source: "web",
+      action: "delete_server",
+      serverId
+    });
+    return { ok: true };
+  }
+
+  @callable()
   async listOperations() {
     return this.data.operationLogs.slice(0, 100);
+  }
+
+  @callable()
+  async listNotificationChannels() {
+    return this.data.notificationChannels;
+  }
+
+  @callable()
+  async saveNotificationChannel(input: {
+    id?: string;
+    name?: string;
+    type?: "generic_webhook" | "wecom" | "telegram";
+    url?: string;
+    chatId?: string;
+    enabled?: boolean;
+  }) {
+    const now = nowIso();
+    const id = safeString(input.id) || randomId("notify");
+    const existing = this.data.notificationChannels.find(
+      (item) => item.id === id
+    );
+    const channel: NotificationChannel = {
+      id,
+      name: safeString(input.name) || existing?.name || "Notification channel",
+      type: input.type || existing?.type || "generic_webhook",
+      url: safeString(input.url) || existing?.url,
+      chatId: safeString(input.chatId) || existing?.chatId,
+      enabled: input.enabled ?? existing?.enabled ?? true,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    };
+    this.save({
+      notificationChannels: [
+        channel,
+        ...this.data.notificationChannels.filter((item) => item.id !== id)
+      ].slice(0, 20)
+    });
+    this.appendLog({
+      source: "web",
+      action: "save_notification_channel",
+      target: channel.name
+    });
+    return channel;
+  }
+
+  @callable()
+  async deleteNotificationChannel(channelId: string) {
+    this.save({
+      notificationChannels: this.data.notificationChannels.filter(
+        (item) => item.id !== channelId
+      )
+    });
+    this.appendLog({
+      source: "web",
+      action: "delete_notification_channel",
+      target: channelId
+    });
+    return { ok: true };
+  }
+
+  @callable()
+  async testNotificationChannel(channelId: string) {
+    const channel = this.data.notificationChannels.find(
+      (item) => item.id === channelId
+    );
+    if (!channel) throw new Error("Notification channel not found.");
+    await this.sendNotification(channel, "EdgeButler test notification.");
+    this.appendLog({
+      source: "web",
+      action: "test_notification_channel",
+      target: channel.name
+    });
+    return { ok: true };
   }
 
   @callable()
@@ -821,8 +992,14 @@ function getController(env: Env) {
   const id = env.EdgeButler.idFromName("controller");
   return env.EdgeButler.get(id) as DurableObjectStub & {
     listServers(): Promise<unknown>;
+    updateServer(serverId: string, input: unknown): Promise<unknown>;
+    deleteServer(serverId: string): Promise<unknown>;
     listOperations(): Promise<unknown>;
     listPendingOperations(): Promise<unknown>;
+    listNotificationChannels(): Promise<unknown>;
+    saveNotificationChannel(input: unknown): Promise<unknown>;
+    deleteNotificationChannel(channelId: string): Promise<unknown>;
+    testNotificationChannel(channelId: string): Promise<unknown>;
     createInstallToken(input?: unknown): Promise<InstallToken>;
     registerServer(input: unknown): Promise<unknown>;
     refreshServer(serverId: string): Promise<unknown>;
@@ -883,12 +1060,56 @@ async function handleApi(request: Request, env: Env) {
     return json(await controller.listServers());
   }
 
+  if (
+    url.pathname.match(/^\/api\/servers\/[^/]+$/) &&
+    request.method === "PATCH"
+  ) {
+    const serverId = decodeURIComponent(url.pathname.split("/")[3]);
+    return json(
+      await controller.updateServer(serverId, await readJson(request))
+    );
+  }
+
+  if (
+    url.pathname.match(/^\/api\/servers\/[^/]+$/) &&
+    request.method === "DELETE"
+  ) {
+    const serverId = decodeURIComponent(url.pathname.split("/")[3]);
+    return json(await controller.deleteServer(serverId));
+  }
+
   if (url.pathname === "/api/operations" && request.method === "GET") {
     return json(await controller.listOperations());
   }
 
   if (url.pathname === "/api/pending-operations" && request.method === "GET") {
     return json(await controller.listPendingOperations());
+  }
+
+  if (url.pathname === "/api/notifications" && request.method === "GET") {
+    return json(await controller.listNotificationChannels());
+  }
+
+  if (url.pathname === "/api/notifications" && request.method === "POST") {
+    return json(
+      await controller.saveNotificationChannel(await readJson(request))
+    );
+  }
+
+  if (
+    url.pathname.match(/^\/api\/notifications\/[^/]+$/) &&
+    request.method === "DELETE"
+  ) {
+    const channelId = decodeURIComponent(url.pathname.split("/")[3]);
+    return json(await controller.deleteNotificationChannel(channelId));
+  }
+
+  if (
+    url.pathname.match(/^\/api\/notifications\/[^/]+\/test$/) &&
+    request.method === "POST"
+  ) {
+    const channelId = decodeURIComponent(url.pathname.split("/")[3]);
+    return json(await controller.testNotificationChannel(channelId));
   }
 
   if (url.pathname === "/api/install-token" && request.method === "POST") {
@@ -902,7 +1123,20 @@ async function handleApi(request: Request, env: Env) {
   }
 
   if (url.pathname === "/api/agent/register" && request.method === "POST") {
-    return json(await controller.registerServer(await readJson(request)));
+    const body = await readJson(request);
+    const cf = request.cf || {};
+    const city = safeString(cf.city);
+    const region = safeString(cf.region);
+    const country = safeString(cf.country);
+    return json(
+      await controller.registerServer({
+        ...body,
+        location:
+          safeString(body.location) ||
+          [city, region, country].filter(Boolean).join("-") ||
+          "unknown"
+      })
+    );
   }
 
   if (

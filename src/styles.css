@@ -26,6 +26,7 @@ body,
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -51,6 +52,7 @@ button.secondary {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid #c7d5bd;
@@ -393,6 +395,33 @@ h3 {
   font-size: 0.85rem;
 }
 
+.notification-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.channel-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.channel-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem;
+  border-radius: 20px;
+  background: #f7fbf1;
+}
+
+.channel-row p {
+  margin: 0.2rem 0 0;
+  color: #617158;
+}
+
 .log-row {
   display: grid;
   grid-template-columns: 190px 1fr 90px minmax(160px, auto);
@@ -425,6 +454,10 @@ h3 {
   }
 
   .log-row {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-form {
     grid-template-columns: 1fr;
   }
 }

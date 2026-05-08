@@ -49,6 +49,17 @@ type PendingOperation = {
   expiresAt: string;
 };
 
+type NotificationChannel = {
+  id: string;
+  name: string;
+  type: "generic_webhook" | "wecom" | "telegram";
+  url?: string;
+  chatId?: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type InstallTokenResponse = {
   token: string;
   serverId: string;
@@ -116,6 +127,7 @@ export default function App() {
   const [pendingOperations, setPendingOperations] = useState<
     PendingOperation[]
   >([]);
+  const [notifications, setNotifications] = useState<NotificationChannel[]>([]);
   const [installToken, setInstallToken] = useState<InstallTokenResponse | null>(
     null
   );
@@ -123,6 +135,12 @@ export default function App() {
     name: "",
     username: "root",
     location: ""
+  });
+  const [notificationForm, setNotificationForm] = useState({
+    name: "",
+    type: "wecom" as NotificationChannel["type"],
+    url: "",
+    chatId: ""
   });
   const [aiCommand, setAiCommand] = useState("");
   const [aiOutput, setAiOutput] = useState("");
@@ -135,14 +153,17 @@ export default function App() {
   );
 
   async function reload() {
-    const [serverData, operationData, pendingData] = await Promise.all([
-      api<ManagedServer[]>("/api/servers"),
-      api<OperationLog[]>("/api/operations"),
-      api<PendingOperation[]>("/api/pending-operations")
-    ]);
+    const [serverData, operationData, pendingData, notificationData] =
+      await Promise.all([
+        api<ManagedServer[]>("/api/servers"),
+        api<OperationLog[]>("/api/operations"),
+        api<PendingOperation[]>("/api/pending-operations"),
+        api<NotificationChannel[]>("/api/notifications")
+      ]);
     setServers(serverData);
     setOperations(operationData);
     setPendingOperations(pendingData);
+    setNotifications(notificationData);
   }
 
   async function withLoading(task: () => Promise<void>) {
@@ -186,6 +207,7 @@ export default function App() {
       setServers([]);
       setOperations([]);
       setPendingOperations([]);
+      setNotifications([]);
       setInstallToken(null);
     });
   }
@@ -222,6 +244,34 @@ export default function App() {
     });
   }
 
+  function editServer(server: ManagedServer) {
+    const name = window.prompt("Server name", server.name);
+    if (name === null) return;
+    const location = window.prompt("Location", server.location);
+    if (location === null) return;
+    void withLoading(async () => {
+      await api(`/api/servers/${encodeURIComponent(server.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name, location })
+      });
+      await reload();
+    });
+  }
+
+  function deleteServer(server: ManagedServer) {
+    if (
+      !window.confirm(`Delete ${server.name}? This removes it from EdgeButler.`)
+    ) {
+      return;
+    }
+    void withLoading(async () => {
+      await api(`/api/servers/${encodeURIComponent(server.id)}`, {
+        method: "DELETE"
+      });
+      await reload();
+    });
+  }
+
   function runAiCommand() {
     const command = aiCommand.trim();
     if (!command) return;
@@ -252,6 +302,40 @@ export default function App() {
         `/api/pending-operations/${encodeURIComponent(operationId)}/cancel`,
         { method: "POST" }
       );
+      await reload();
+    });
+  }
+
+  function saveNotification() {
+    void withLoading(async () => {
+      await api("/api/notifications", {
+        method: "POST",
+        body: JSON.stringify(notificationForm)
+      });
+      setNotificationForm({
+        name: "",
+        type: "wecom",
+        url: "",
+        chatId: ""
+      });
+      await reload();
+    });
+  }
+
+  function testNotification(channelId: string) {
+    void withLoading(async () => {
+      await api(`/api/notifications/${encodeURIComponent(channelId)}/test`, {
+        method: "POST"
+      });
+      await reload();
+    });
+  }
+
+  function deleteNotification(channelId: string) {
+    void withLoading(async () => {
+      await api(`/api/notifications/${encodeURIComponent(channelId)}`, {
+        method: "DELETE"
+      });
       await reload();
     });
   }
@@ -460,6 +544,106 @@ export default function App() {
       <section className="panel">
         <div className="panel-header">
           <div>
+            <h2>Notifications</h2>
+            <p>Configure Telegram, Enterprise WeChat, or generic webhooks.</p>
+          </div>
+        </div>
+        <div className="notification-form">
+          <label>
+            Name
+            <input
+              value={notificationForm.name}
+              onChange={(event) =>
+                setNotificationForm((current) => ({
+                  ...current,
+                  name: event.target.value
+                }))
+              }
+              placeholder="Ops WeCom"
+            />
+          </label>
+          <label>
+            Type
+            <select
+              value={notificationForm.type}
+              onChange={(event) =>
+                setNotificationForm((current) => ({
+                  ...current,
+                  type: event.target.value as NotificationChannel["type"]
+                }))
+              }
+            >
+              <option value="wecom">Enterprise WeChat</option>
+              <option value="telegram">Telegram</option>
+              <option value="generic_webhook">Generic webhook</option>
+            </select>
+          </label>
+          <label>
+            Webhook URL
+            <input
+              value={notificationForm.url}
+              onChange={(event) =>
+                setNotificationForm((current) => ({
+                  ...current,
+                  url: event.target.value
+                }))
+              }
+              placeholder="https://..."
+            />
+          </label>
+          <label>
+            Telegram chat ID
+            <input
+              value={notificationForm.chatId}
+              onChange={(event) =>
+                setNotificationForm((current) => ({
+                  ...current,
+                  chatId: event.target.value
+                }))
+              }
+              placeholder="Only for Telegram"
+            />
+          </label>
+          <button
+            disabled={loading || !notificationForm.name.trim()}
+            onClick={saveNotification}
+          >
+            Save channel
+          </button>
+        </div>
+        {notifications.length > 0 && (
+          <div className="channel-list">
+            {notifications.map((channel) => (
+              <div className="channel-row" key={channel.id}>
+                <div>
+                  <strong>{channel.name}</strong>
+                  <p>{channel.type}</p>
+                </div>
+                <div className="button-row">
+                  <button
+                    className="secondary"
+                    disabled={loading}
+                    onClick={() => testNotification(channel.id)}
+                  >
+                    Test
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={loading}
+                    onClick={() => deleteNotification(channel.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
             <h2>VPS Fleet</h2>
             <p>Realtime checks are pulled only when you click refresh.</p>
           </div>
@@ -496,6 +680,22 @@ export default function App() {
                 >
                   Refresh this VPS
                 </button>
+                <div className="button-row">
+                  <button
+                    className="secondary"
+                    disabled={loading}
+                    onClick={() => editServer(server)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={loading}
+                    onClick={() => deleteServer(server)}
+                  >
+                    Delete
+                  </button>
+                </div>
               </article>
             ))}
           </div>

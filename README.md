@@ -12,12 +12,16 @@ operations platform.
 - One-time install token generation.
 - One-click Linux agent install command generation.
 - Agent self-registration.
+- Default server naming from username, location, and IP suffix.
+- Server rename, location update, and delete actions from the web console.
 - Per-VPS agent token after registration.
 - On-demand single VPS refresh.
 - On-demand all VPS refresh.
 - AI command endpoint for natural-language operations.
 - Pending confirmation queue for mutating operations.
 - Telegram webhook entrypoint.
+- Notification channel configuration for Enterprise WeChat, Telegram, and
+  generic webhooks.
 - Operation audit log stored in the controller Agent state.
 - D1 schema draft in `migrations/0001_initial.sql` for the next persistence step.
 
@@ -114,5 +118,5 @@ web console must confirm it before execution.
 ## Notes
 
 This is still an early platform refactor. The next important steps are page
-login, D1-backed persistence, token hashing, command confirmation UX, and
-staging deployment against a disposable test VPS.
+Cloudflare deployment, D1-backed persistence, token hashing/encryption at rest,
+and staging deployment against a disposable test VPS.

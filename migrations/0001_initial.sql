@@ -37,6 +37,30 @@ CREATE TABLE IF NOT EXISTS operation_logs (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS notification_channels (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  url TEXT,
+  chat_id TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pending_operations (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL,
+  server_name TEXT NOT NULL,
+  source TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target TEXT,
+  command TEXT,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_servers_status ON servers(status);
 CREATE INDEX IF NOT EXISTS idx_operation_logs_created_at ON operation_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_operation_logs_server_id ON operation_logs(server_id);
+CREATE INDEX IF NOT EXISTS idx_pending_operations_expires_at ON pending_operations(expires_at);
