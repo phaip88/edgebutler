@@ -357,6 +357,15 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     });
   }
 
+  private async notifyAll(text: string) {
+    const channels = this.data.notificationChannels.filter(
+      (item) => item.enabled
+    );
+    await Promise.allSettled(
+      channels.map((channel) => this.sendNotification(channel, text))
+    );
+  }
+
   @callable()
   async listServers() {
     return this.data.servers.map((server) => {
@@ -647,6 +656,11 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     );
 
     this.save({ servers });
+    if (!result.ok) {
+      await this.notifyAll(
+        `[EdgeButler] ${server.name} appears offline or unhealthy during refresh.`
+      );
+    }
     this.appendLog({
       source: "web",
       action: "refresh_server",
@@ -795,6 +809,9 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       serverId: server.id,
       command: plan.command
     });
+    void this.notifyAll(
+      `[EdgeButler] Confirmation required: ${plan.action} on ${server.name}. ID: ${pending.id}`
+    );
     return pending;
   }
 
@@ -824,6 +841,12 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       serverId: input.server.id,
       output: rawOutput
     });
+
+    if (MUTATING_ACTIONS.has(input.action)) {
+      void this.notifyAll(
+        `[EdgeButler] Executed ${input.action} on ${input.server.name}.`
+      );
+    }
 
     return [
       `[Operation] ${input.server.name} / ${input.action}`,
