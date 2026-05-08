@@ -69,6 +69,23 @@ type PendingOperation = {
   expiresAt: string;
 };
 
+type AgentTask = {
+  id: string;
+  serverId: string;
+  action: string;
+  target?: string;
+  command?: string;
+  status: "queued" | "claimed" | "completed" | "failed";
+  result?: {
+    stdout?: string;
+    stderr?: string;
+    code?: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+};
+
 type NotificationChannel = {
   id: string;
   name: string;
@@ -88,6 +105,7 @@ type EdgeButlerState = {
   installTokens: InstallToken[];
   operationLogs: OperationLog[];
   pendingOperations: PendingOperation[];
+  agentTasks: AgentTask[];
   notificationChannels: NotificationChannel[];
 };
 
@@ -243,6 +261,10 @@ function truncate(value: string, limit = 4000) {
     : value;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function isIp(host: string) {
   return /^[0-9.]+$/.test(host);
 }
@@ -296,6 +318,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     installTokens: [],
     operationLogs: [],
     pendingOperations: [],
+    agentTasks: [],
     notificationChannels: []
   };
 
@@ -307,6 +330,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       installTokens: this.state?.installTokens || [],
       operationLogs: this.state?.operationLogs || [],
       pendingOperations: this.state?.pendingOperations || [],
+      agentTasks: this.state?.agentTasks || [],
       notificationChannels: this.state?.notificationChannels || [],
       history: this.state?.history || []
     };
@@ -635,6 +659,106 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     });
 
     return { serverId: server.id, token: serverToken, name: server.name };
+  }
+
+  @callable()
+  async pollAgent(input: { serverId?: string; token?: string }) {
+    const server = this.authenticateAgent(input.serverId, input.token);
+    const now = nowIso();
+    const expiresAt = Date.now();
+    const currentTasks = this.data.agentTasks.filter(
+      (task) =>
+        task.status === "queued" ||
+        task.status === "claimed" ||
+        Date.parse(task.createdAt) > Date.now() - 10 * 60_000
+    );
+    const task = currentTasks.find(
+      (item) =>
+        item.serverId === server.id &&
+        item.status === "queued" &&
+        Date.parse(item.expiresAt) > expiresAt
+    );
+
+    this.save({
+      servers: this.data.servers.map((item) =>
+        item.id === server.id
+          ? {
+              ...item,
+              status: "online" as const,
+              lastSeenAt: now,
+              updatedAt: now
+            }
+          : item
+      ),
+      agentTasks: task
+        ? currentTasks.map((item) =>
+            item.id === task.id
+              ? { ...item, status: "claimed" as const, updatedAt: now }
+              : item
+          )
+        : currentTasks
+    });
+
+    if (!task) return { task: null, pollAfterSeconds: 5 };
+    return {
+      task: {
+        id: task.id,
+        action: task.action,
+        target: task.target || "",
+        command: task.command || ""
+      },
+      pollAfterSeconds: 1
+    };
+  }
+
+  @callable()
+  async reportAgentResult(input: {
+    serverId?: string;
+    token?: string;
+    taskId?: string;
+    stdout?: string;
+    stderr?: string;
+    code?: number;
+  }) {
+    const server = this.authenticateAgent(input.serverId, input.token);
+    const taskId = safeString(input.taskId);
+    if (!taskId) throw new Error("taskId is required.");
+
+    const now = nowIso();
+    const result = {
+      stdout: truncate(safeString(input.stdout), 8000),
+      stderr: truncate(safeString(input.stderr), 8000),
+      code: typeof input.code === "number" ? input.code : 0
+    };
+    let found = false;
+    const agentTasks = this.data.agentTasks.map((task) => {
+      if (task.id !== taskId || task.serverId !== server.id) return task;
+      found = true;
+      return {
+        ...task,
+        status:
+          result.code === 0 ? ("completed" as const) : ("failed" as const),
+        result,
+        updatedAt: now
+      };
+    });
+    if (!found) throw new Error("Task not found.");
+
+    this.save({
+      agentTasks,
+      servers: this.data.servers.map((item) =>
+        item.id === server.id
+          ? {
+              ...item,
+              status: "online" as const,
+              lastSeenAt: now,
+              updatedAt: now
+            }
+          : item
+      )
+    });
+
+    return { ok: true };
   }
 
   @callable()
@@ -968,36 +1092,60 @@ For mutating actions, return an action with needsConfirmation false first so the
     target = "",
     command = ""
   ): Promise<{ ok: boolean; stdout?: string; stderr?: string; code?: number }> {
-    const response = await fetch(
-      `${server.agentUrl.replace(/\/+$/, "")}/api/run`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "EdgeButler/2.0 Cloudflare-Worker"
-        },
-        body: JSON.stringify({
-          token: server.token,
-          action,
-          target,
-          command
-        })
-      }
-    );
+    const now = nowIso();
+    const task: AgentTask = {
+      id: randomId("task"),
+      serverId: server.id,
+      action,
+      target,
+      command,
+      status: "queued",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: new Date(Date.now() + 45_000).toISOString()
+    };
 
-    if (!response.ok) {
-      return {
-        ok: false,
-        stderr: `HTTP ${response.status}: ${await response.text()}`
-      };
+    this.save({
+      agentTasks: [
+        task,
+        ...this.data.agentTasks.filter(
+          (item) =>
+            Date.parse(item.createdAt) > Date.now() - 10 * 60_000 ||
+            item.status === "queued" ||
+            item.status === "claimed"
+        )
+      ].slice(0, 200)
+    });
+
+    for (let attempt = 0; attempt < 45; attempt += 1) {
+      await sleep(1000);
+      const latest = this.data.agentTasks.find((item) => item.id === task.id);
+      if (latest?.result) {
+        return {
+          ok: latest.result.code === undefined || latest.result.code === 0,
+          ...latest.result
+        };
+      }
     }
 
-    const data = (await response.json()) as {
-      stdout?: string;
-      stderr?: string;
-      code?: number;
+    return {
+      ok: false,
+      stderr:
+        "Timed out waiting for agent polling result. The agent may be offline or unable to reach the Worker."
     };
-    return { ok: data.code === undefined || data.code === 0, ...data };
+  }
+
+  private authenticateAgent(serverId?: string, token?: string) {
+    const id = safeString(serverId);
+    const agentToken = safeString(token);
+    if (!id || !agentToken) {
+      throw new Error("serverId and token are required.");
+    }
+    const server = this.data.servers.find((item) => item.id === id);
+    if (!server || server.token !== agentToken) {
+      throw new Error("Invalid agent credentials.");
+    }
+    return server;
   }
 
   private parseSnapshot(output: string): Partial<ServerSnapshot> {
@@ -1032,6 +1180,8 @@ function getController(env: Env) {
     testNotificationChannel(channelId: string): Promise<unknown>;
     createInstallToken(input?: unknown): Promise<InstallToken>;
     registerServer(input: unknown): Promise<unknown>;
+    pollAgent(input: unknown): Promise<unknown>;
+    reportAgentResult(input: unknown): Promise<unknown>;
     refreshServer(serverId: string): Promise<unknown>;
     refreshAllServers(): Promise<unknown>;
     confirmOperation(operationId: string): Promise<string>;
@@ -1080,7 +1230,9 @@ async function handleApi(request: Request, env: Env) {
   }
 
   if (
-    url.pathname !== "/api/agent/register" &&
+    !["/api/agent/register", "/api/agent/poll", "/api/agent/result"].includes(
+      url.pathname
+    ) &&
     !(await verifySession(request, env))
   ) {
     return json({ error: "Authentication required." }, { status: 401 });
@@ -1169,6 +1321,14 @@ async function handleApi(request: Request, env: Env) {
     );
   }
 
+  if (url.pathname === "/api/agent/poll" && request.method === "POST") {
+    return json(await controller.pollAgent(await readJson(request)));
+  }
+
+  if (url.pathname === "/api/agent/result" && request.method === "POST") {
+    return json(await controller.reportAgentResult(await readJson(request)));
+  }
+
   if (
     url.pathname.match(/^\/api\/servers\/[^/]+\/refresh$/) &&
     request.method === "POST"
@@ -1232,7 +1392,7 @@ apt-get install -y python3 python3-venv python3-pip curl
 mkdir -p "$INSTALL_DIR"
 
 cat > "$INSTALL_DIR/agent.py" <<'PY'
-${VPS_AGENT_SOURCE.replace(/\$/g, "\\$")}
+${VPS_AGENT_SOURCE}
 PY
 
 cat > "$INSTALL_DIR/config.env" <<EOF
@@ -1293,6 +1453,8 @@ import os
 import platform
 import socket
 import subprocess
+import threading
+import time
 import requests
 
 app = Flask(__name__)
@@ -1300,6 +1462,7 @@ app = Flask(__name__)
 ENDPOINT = os.environ.get("EDGEBUTLER_ENDPOINT", "").rstrip("/")
 INSTALL_TOKEN = os.environ.get("EDGEBUTLER_INSTALL_TOKEN", "")
 AGENT_TOKEN = os.environ.get("EDGEBUTLER_AGENT_TOKEN", "")
+SERVER_ID = os.environ.get("EDGEBUTLER_SERVER_ID", "")
 PORT = int(os.environ.get("EDGEBUTLER_PORT", "8080"))
 
 @app.get("/health")
@@ -1326,24 +1489,85 @@ def run_command(cmd):
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
     return {"stdout": result.stdout, "stderr": result.stderr, "code": result.returncode}
 
+def execute_action(action, target="", command=""):
+    target = str(target or "")
+    command = str(command or "")
+    if action == "shell":
+        if not command:
+            return {"stdout": "", "stderr": "command is required", "code": 2}
+        return run_command(command)
+    if action not in ACTIONS:
+        return {"stdout": "", "stderr": f"unsupported action: {action}", "code": 2}
+    template = ACTIONS[action]
+    if "{target}" in template:
+        if not target:
+            return {"stdout": "", "stderr": "target is required", "code": 2}
+        command = template.replace("{target}", target.replace("'", "'\\''"))
+    else:
+        command = template
+    return run_command(command)
+
 def register():
-    global AGENT_TOKEN
-    if not ENDPOINT or not INSTALL_TOKEN or AGENT_TOKEN:
+    global AGENT_TOKEN, SERVER_ID
+    if not ENDPOINT:
         return
+    if AGENT_TOKEN and SERVER_ID:
+        return
+    if not INSTALL_TOKEN:
+        return
+    public_ip = requests.get("https://api.ipify.org", timeout=10).text.strip()
     payload = {
         "installToken": INSTALL_TOKEN,
-        "host": requests.get("https://api.ipify.org", timeout=10).text.strip(),
+        "host": public_ip,
         "username": os.environ.get("USER", "root"),
         "hostname": socket.gethostname(),
         "location": "unknown",
-        "agentUrl": f"http://{requests.get('https://api.ipify.org', timeout=10).text.strip()}.nip.io:{PORT}",
+        "agentUrl": f"http://{public_ip}.nip.io:{PORT}",
     }
     response = requests.post(f"{ENDPOINT}/api/agent/register", json=payload, timeout=20)
     response.raise_for_status()
     data = response.json()
     AGENT_TOKEN = data["token"]
+    SERVER_ID = data["serverId"]
     with open("/opt/edgebutler/config.env", "a", encoding="utf-8") as file:
         file.write(f"\nEDGEBUTLER_AGENT_TOKEN={AGENT_TOKEN}\n")
+        file.write(f"EDGEBUTLER_SERVER_ID={SERVER_ID}\n")
+
+def poll_loop():
+    while True:
+        try:
+            if not ENDPOINT or not AGENT_TOKEN or not SERVER_ID:
+                time.sleep(10)
+                continue
+            response = requests.post(
+                f"{ENDPOINT}/api/agent/poll",
+                json={"serverId": SERVER_ID, "token": AGENT_TOKEN},
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+            task = data.get("task")
+            if not task:
+                time.sleep(int(data.get("pollAfterSeconds", 5)))
+                continue
+            result = execute_action(
+                task.get("action", ""),
+                task.get("target", ""),
+                task.get("command", ""),
+            )
+            requests.post(
+                f"{ENDPOINT}/api/agent/result",
+                json={
+                    "serverId": SERVER_ID,
+                    "token": AGENT_TOKEN,
+                    "taskId": task.get("id"),
+                    **result,
+                },
+                timeout=30,
+            ).raise_for_status()
+        except Exception as exc:
+            print(f"poll error: {exc}", flush=True)
+            time.sleep(10)
 
 @app.route("/api/run", methods=["POST"])
 def api_run():
@@ -1353,23 +1577,11 @@ def api_run():
     action = data.get("action", "")
     target = str(data.get("target", ""))
     command = str(data.get("command", ""))
-    if action == "shell":
-        if not command:
-            return jsonify({"error": "command is required"}), 400
-        return jsonify(run_command(command))
-    if action not in ACTIONS:
-        return jsonify({"error": f"unsupported action: {action}"}), 400
-    template = ACTIONS[action]
-    if "{target}" in template:
-        if not target:
-            return jsonify({"error": "target is required"}), 400
-        command = template.replace("{target}", target.replace("'", "'\\''"))
-    else:
-        command = template
-    return jsonify(run_command(command))
+    return jsonify(execute_action(action, target, command))
 
 if __name__ == "__main__":
     register()
+    threading.Thread(target=poll_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=PORT)
 `;
 

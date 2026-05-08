@@ -32,12 +32,14 @@ Web Console / Telegram
   -> Cloudflare Worker API
   -> EdgeButler Durable Object Agent
   -> Workers AI for intent parsing and summaries
-  -> VPS Agent HTTP API
+  -> VPS Agent outbound polling
   -> Linux command output
 ```
 
 Realtime monitoring is intentionally pull-based for now. The page shows the last
-known state and only refreshes a VPS when the operator clicks a button.
+known state and only creates a VPS task when the operator clicks a button. The
+VPS agent polls the Worker over outbound HTTPS, so normal operation does not
+require opening an inbound port on the VPS.
 
 ## Development
 
@@ -98,10 +100,9 @@ The installer starts the agent with systemd when available. In lightweight VPS,
 container, or chroot environments without systemd, it falls back to a background
 runner and writes `/opt/edgebutler/agent.pid` and `/opt/edgebutler/agent.log`.
 
-The current refresh path requires the Cloudflare Worker to reach the agent's
-HTTP port from the public internet. VPS environments that block inbound ports
-can still register through outbound HTTPS, but on-demand refresh needs an
-allowed inbound port, a tunnel, or a future reverse-polling agent mode.
+The agent polls `/api/agent/poll` and reports command output to
+`/api/agent/result`. This avoids the previous requirement for the Worker to
+reach the agent's HTTP port from the public internet.
 
 ## Supported Actions
 
