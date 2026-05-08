@@ -1,12 +1,14 @@
 {
-  "name": "agent-starter",
+  "name": "edgebutler",
   "version": "1.0.0",
   "private": true,
-  "description": "Starter template for building AI chat agents on Cloudflare",
+  "description": "AI VPS operations platform on Cloudflare Workers",
   "keywords": [
     "agents",
     "ai",
-    "cloudflare"
+    "cloudflare",
+    "operations",
+    "vps"
   ],
   "license": "MIT",
   "type": "module",

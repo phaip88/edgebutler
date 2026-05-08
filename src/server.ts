@@ -5,233 +5,840 @@ type ChatMessage = {
   content: string;
 };
 
-type MyState = {
-  rules: string;
-  history: ChatMessage[];
+type ServerStatus = "pending" | "online" | "offline" | "unknown";
+
+type ManagedServer = {
+  id: string;
+  name: string;
+  customName?: string;
+  username: string;
+  host: string;
+  agentUrl: string;
+  token: string;
+  location: string;
+  tags: string[];
+  status: ServerStatus;
+  lastSeenAt?: string;
+  lastSnapshot?: ServerSnapshot;
+  createdAt: string;
+  updatedAt: string;
 };
 
-export class EdgeButler extends Agent<any, MyState> {
-  initialState: MyState = { rules: "暂无", history: [] };
+type ServerSnapshot = {
+  hostname?: string;
+  os?: string;
+  uptime?: string;
+  load?: string;
+  memory?: string;
+  disk?: string;
+  topProcesses?: string;
+  collectedAt: string;
+};
 
-  @callable()
-  async run(command: string) {
-    try {
-      const currentRules = this.state?.rules || this.initialState.rules;
-      const history = this.state?.history || [];
+type InstallToken = {
+  token: string;
+  serverId: string;
+  name?: string;
+  username?: string;
+  location?: string;
+  expiresAt: string;
+  usedAt?: string;
+  createdAt: string;
+};
 
-      if (command.startsWith("老规矩：")) {
-        const newRule = command.replace("老规矩：", "");
-        this.setState({ rules: newRule });
-        return `[系统] 规则更新成功：${newRule}`;
-      }
+type OperationLog = {
+  id: string;
+  serverId?: string;
+  source: "web" | "telegram" | "agent" | "system";
+  action: string;
+  target?: string;
+  command?: string;
+  output?: string;
+  createdAt: string;
+};
 
-      // ==========================================
-      // Phase 1: Intent Recognition & Action Parsing
-      // ==========================================
-      const systemPrompt = `
-你是一个专业的 Linux 运维总监。
-出于极高的安全要求，你**绝对不能**直接生成任意的 Linux 终端命令！
-你必须将用户的需求转换为受限的、安全的“动作意图”。
-当前老规矩/记忆：${currentRules}。
+type EdgeButlerState = {
+  rules: string;
+  history: ChatMessage[];
+  servers: ManagedServer[];
+  installTokens: InstallToken[];
+  operationLogs: OperationLog[];
+};
 
-请只输出合法的 JSON，不要包含任何额外的废话或 Markdown 符号。
+type ActionPlan =
+  | { type: "chat"; text: string }
+  | {
+      type: "action";
+      serverId?: string;
+      serverName?: string;
+      action: string;
+      target?: string;
+      command?: string;
+      needsConfirmation?: boolean;
+    };
 
-格式要求：
-如果是闲聊或不支持的操作，返回: {"type": "chat", "text": "你的回复"}
-如果是运维请求，返回: {"type": "action", "action": "具体的动作名", "target": "目标参数（如果没有则留空）"}
+type Env = {
+  AI: Ai;
+  EdgeButler: DurableObjectNamespace<EdgeButler>;
+  TELEGRAM_BOT_TOKEN?: string;
+};
 
-目前服务器仅仅允许执行以下安全的 action 白名单：
-- "check_memory" (查内存)
-- "check_disk" (查磁盘)
-- "check_os_version" (查系统版本)
-- "check_cpu" (查系统负载、CPU使用率)
-- "check_top_processes" (查资源占用最高的进程、当前运行的所有进程列表、系统负载最高是谁)
-- "check_network" (查网络连通性)
-- "check_docker" (查运行中的 Docker 容器)
-- "check_logs" (查系统最近的系统日志)
-- "check_port" (查端口，**必须**在 target 填端口号，例如 "2096")
-- "check_process" (查指定进程，**必须**在 target 填具体的进程名，例如 "nginx")
-- "restart_service" (重启服务，**必须**在 target 填服务名，例如 "nginx")
+const ACTIONS_REQUIRING_TARGET = new Set([
+  "check_port",
+  "check_process",
+  "restart_service",
+  "service_health",
+  "shell"
+]);
 
-⚠️ 重要规则：如果用户的需求需要用到上述带 target 的动作（如 check_port, check_process, restart_service），但用户在上下文中并没有明确指出具体的端口号或服务名，你**必须**返回 type 为 "chat"，并主动询问用户具体要查询或操作哪个目标。绝对不能在 target 为空的情况下返回这些 action！
+const MUTATING_ACTIONS = new Set(["restart_service", "shell"]);
 
-如果用户的需求不在上述白名单中，或者是危险的破坏性操作（如 rm, kill, 刷机等），请返回 type 为 "chat"，并礼貌地拒绝执行。
+const JSON_HEADERS = {
+  "Content-Type": "application/json; charset=utf-8"
+};
 
-例如用户说查2096端口开了没，你应该返回: {"type": "action", "action": "check_port", "target": "2096"}
-例如用户说看看磁盘，你应该返回: {"type": "action", "action": "check_disk", "target": ""}
-例如用户说帮我查一下指定进程，你应该返回: {"type": "chat", "text": "请问您想查询哪个具体的进程（例如 nginx 或 python）？"}
-例如用户说有哪些进程在运行，你应该返回: {"type": "action", "action": "check_top_processes", "target": ""}
-      `;
+function json(data: unknown, init?: ResponseInit) {
+  return new Response(JSON.stringify(data, null, 2), {
+    ...init,
+    headers: { ...JSON_HEADERS, ...init?.headers }
+  });
+}
 
-      // 组装带有上下文的对话
-      const messages: any[] = [
-        { role: "system", content: systemPrompt },
-        ...history,
-        { role: "user", content: command }
-      ];
+function nowIso() {
+  return new Date().toISOString();
+}
 
-      const aiResponse = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
-        messages: messages
-      });
+function randomId(prefix: string) {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  const value = [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `${prefix}_${value}`;
+}
 
-      let aiPlan;
-      try {
-        // 清理可能带有的 markdown 标记并解析 JSON
-        const rawJson = aiResponse.response.replace(/```json/g, "").replace(/```/g, "").trim();
-        aiPlan = JSON.parse(rawJson);
-      } catch (e) {
-        return `⚠️ AI 解析指令失败，请换个说法。AI 原话: ${aiResponse.response}`;
-      }
+function safeString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
 
-      let newHistory = [...history, { role: "user", content: command }];
+function truncate(value: string, limit = 4000) {
+  return value.length > limit
+    ? `${value.slice(0, limit)}...(truncated)`
+    : value;
+}
 
-      // ==========================================
-      // Phase 2: Action Execution based on Intent
-      // ==========================================
-      if (aiPlan.type === "chat") {
-        newHistory.push({ role: "assistant", content: JSON.stringify({ type: "chat", text: aiPlan.text }) });
-        if (newHistory.length > 10) newHistory = newHistory.slice(-10);
-        this.setState({ history: newHistory });
+function isIp(host: string) {
+  return /^[0-9.]+$/.test(host);
+}
 
-        return `[EdgeButler] ${aiPlan.text}`;
-      }
+function buildAgentUrl(host: string) {
+  const normalized = host.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const targetHost = isIp(normalized) ? `${normalized}.nip.io` : normalized;
+  return `http://${targetHost}:8080`;
+}
 
-      if (aiPlan.type === "action") {
-        // Validation: Intercept actions requiring a target when none is provided
-        const requiresTarget = ["check_port", "check_process", "restart_service"];
-        if (requiresTarget.includes(aiPlan.action) && !aiPlan.target) {
-          const typeName = aiPlan.action.includes('port') ? '端口' : (aiPlan.action.includes('service') ? '服务' : '进程');
-          const replyText = `请明确指出您想要操作的具体${typeName}名称或号码。`;
-          const reply = `[EdgeButler] ${replyText}`;
-          
-          newHistory.push({ role: "assistant", content: JSON.stringify({ type: "chat", text: replyText }) });
-          if (newHistory.length > 10) newHistory = newHistory.slice(-10);
-          this.setState({ history: newHistory });
-          
-          return reply;
-        }
+function inferServerName(input: {
+  username?: string;
+  location?: string;
+  host?: string;
+  customName?: string;
+}) {
+  if (input.customName?.trim()) return input.customName.trim();
+  const user = input.username?.trim() || "root";
+  const location = input.location?.trim() || "unknown";
+  const host = input.host?.trim() || "pending";
+  const suffix = host.split(".").slice(-2).join(".");
+  return `${user}-${location}-${suffix}`;
+}
 
-        // AI 决定执行受限动作，开始呼叫 VPS 的 API
-        const vpsIp = this.env.VPS_IP;
-        const vpsToken = this.env.VPS_TOKEN;
-        
-        // 如果填的是纯 IP，Cloudflare 会拦截并报 1003 Error。所以如果是 IP，自动加上 .nip.io 变成域名。
-        const isIp = /^[0-9.]+$/.test(vpsIp);
-        const targetUrl = isIp ? `http://${vpsIp}.nip.io:8080/api/run` : `http://${vpsIp}:8080/api/run`;
-        
-        const execRes = await fetch(targetUrl, {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "User-Agent": "EdgeButler/1.0 Cloudflare-Worker"
-          },
-          body: JSON.stringify({ 
-            token: vpsToken, 
-            action: aiPlan.action,
-            target: aiPlan.target || ""
-          })
-        });
-
-        if (!execRes.ok) {
-          const errText = await execRes.text();
-          console.error(`VPS Request Failed: ${execRes.status} ${execRes.statusText} - ${errText}`);
-          return `[错误] 无法连接到服务器 (${vpsIp}, HTTP ${execRes.status})。\n详情: ${errText.substring(0, 100)}`;
-        }
-
-        const vpsData = await execRes.json();
-        
-        // ==========================================
-        // Phase 3: Result Summarization (ReAct Loop)
-        // ==========================================
-        let rawOutput = vpsData.stdout || vpsData.stderr;
-        if (!rawOutput) {
-          if (aiPlan.action === "check_process" || aiPlan.action === "check_port") {
-            rawOutput = "无输出结果。这通常意味着该进程/服务完全没有在运行，或者该端口根本没被占用。";
-          } else {
-            rawOutput = "命令执行成功，但没有任何返回信息。";
-          }
-        }
-        
-        // Truncate output to prevent exceeding model token limits
-        if (rawOutput.length > 800) rawOutput = rawOutput.substring(0, 800) + "...(truncated)";
-
-        const summarizePrompt = `
-You previously executed the action: \`${aiPlan.action}\` (Target: ${aiPlan.target || 'None'})
-The raw server output is:
-${rawOutput}
-Please provide a brief, professional summary of the results in Chinese for the user.
-Warning: If the output indicates "no output" or "not found", explicitly state that the process/service does not exist or is not running. Do not fabricate successful statuses.
-        `;
-
-        const summaryRes = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
-          messages:[{ role: "user", content: summarizePrompt }]
-        });
-
-        // Update history with action intent and execution summary
-        const actionIntent = JSON.stringify({
-          type: "action",
-          action: aiPlan.action,
-          target: aiPlan.target || ""
-        });
-        newHistory.push({ role: "assistant", content: actionIntent });
-        
-        newHistory.push({ role: "user", content: `[System Report - Execution Result]:\n${summaryRes.response}` });
-        
-        if (newHistory.length > 10) newHistory = newHistory.slice(-10);
-        this.setState({ history: newHistory });
-
-        return `[执行动作]: ${aiPlan.action} ${aiPlan.target || ''}\n\n[管家汇报]:\n${summaryRes.response}`;
-      }
-
-      return "[警告] 遇到未知的操作类型。";
-    } catch (error: any) {
-      return `[系统错误]: ${error.message}`;
-    }
+async function readJson(request: Request) {
+  try {
+    return (await request.json()) as Record<string, unknown>;
+  } catch {
+    return {};
   }
 }
 
-// Application Entry Point
-export default {
-  async fetch(request: Request, env: any, ctx: any) {
-    const url = new URL(request.url);
-    
-    console.log(`[Incoming Request]: ${request.method} ${url.pathname}`);
+async function sendTelegram(
+  token: string,
+  chatId: number | string,
+  text: string
+) {
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ chat_id: chatId, text })
+  });
+}
 
-    if (url.pathname === "/telegram" && request.method === "POST") {
-      try {
-        const update = await request.json();
-        console.log("[Telegram Update Received]:", JSON.stringify(update));
-        
-        if (update.message && update.message.text) {
-          const chatId = update.message.chat.id;
-          const text = update.message.text;
-          console.log(`[User Input]: ${text}`);
+export class EdgeButler extends Agent<Env, EdgeButlerState> {
+  initialState: EdgeButlerState = {
+    rules:
+      "Prefer safe built-in actions. Shell commands require user confirmation.",
+    history: [],
+    servers: [],
+    installTokens: [],
+    operationLogs: []
+  };
 
-          const id = env.EdgeButler.idFromName("default-instance");
-          const stub = env.EdgeButler.get(id) as any;
-          
-          console.log("[AI Processing Started]");
-          const responseText = await stub.run(text);
-          console.log("[AI Processing Completed]");
+  private get data() {
+    return {
+      ...this.initialState,
+      ...this.state,
+      servers: this.state?.servers || [],
+      installTokens: this.state?.installTokens || [],
+      operationLogs: this.state?.operationLogs || [],
+      history: this.state?.history || []
+    };
+  }
 
-          const botToken = env.TELEGRAM_BOT_TOKEN; 
-          const tgResponse = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId, text: responseText })
-          });
-          
-          const tgResult = await tgResponse.json();
-          console.log("[Telegram API Response]:", JSON.stringify(tgResult));
-        } else {
-          console.log("[Notice]: Non-text message received, ignoring.");
-        }
-      } catch (error) {
-        console.error("[Telegram Route Error]:", error);
-      }
-      return new Response("OK");
+  private save(patch: Partial<EdgeButlerState>) {
+    this.setState({ ...this.data, ...patch });
+  }
+
+  private appendLog(log: Omit<OperationLog, "id" | "createdAt">) {
+    const operationLogs = [
+      {
+        id: randomId("op"),
+        createdAt: nowIso(),
+        ...log
+      },
+      ...this.data.operationLogs
+    ].slice(0, 200);
+    this.save({ operationLogs });
+  }
+
+  @callable()
+  async listServers() {
+    return this.data.servers.map((server) => {
+      const publicServer = { ...server };
+      delete (publicServer as Partial<ManagedServer>).token;
+      return publicServer;
+    });
+  }
+
+  @callable()
+  async listOperations() {
+    return this.data.operationLogs.slice(0, 100);
+  }
+
+  @callable()
+  async createInstallToken(input?: {
+    name?: string;
+    username?: string;
+    location?: string;
+    ttlMinutes?: number;
+  }) {
+    const ttlMinutes = Math.min(Math.max(input?.ttlMinutes || 60, 5), 1440);
+    const createdAt = nowIso();
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60_000).toISOString();
+    const installToken: InstallToken = {
+      token: randomId("install"),
+      serverId: randomId("srv"),
+      name: input?.name?.trim() || undefined,
+      username: input?.username?.trim() || undefined,
+      location: input?.location?.trim() || undefined,
+      createdAt,
+      expiresAt
+    };
+
+    this.save({
+      installTokens: [installToken, ...this.data.installTokens].slice(0, 100)
+    });
+
+    this.appendLog({
+      source: "web",
+      action: "create_install_token",
+      serverId: installToken.serverId
+    });
+
+    return installToken;
+  }
+
+  @callable()
+  async registerServer(input: {
+    installToken: string;
+    host: string;
+    username?: string;
+    hostname?: string;
+    location?: string;
+    agentUrl?: string;
+    tags?: string[];
+  }) {
+    const token = safeString(input.installToken);
+    const installToken = this.data.installTokens.find(
+      (item) => item.token === token
+    );
+
+    if (!installToken) {
+      throw new Error("Invalid install token.");
+    }
+    if (installToken.usedAt) {
+      throw new Error("Install token has already been used.");
+    }
+    if (Date.parse(installToken.expiresAt) < Date.now()) {
+      throw new Error("Install token has expired.");
     }
 
-    return (await routeAgentRequest(request, env)) ?? new Response("Not Found", { status: 404 });
+    const host = safeString(input.host);
+    if (!host) throw new Error("host is required.");
+
+    const createdAt = nowIso();
+    const serverToken = randomId("agent");
+    const username =
+      safeString(input.username) || installToken.username || "root";
+    const location =
+      safeString(input.location) || installToken.location || "unknown";
+    const name = inferServerName({
+      username,
+      location,
+      host,
+      customName: installToken.name
+    });
+
+    const server: ManagedServer = {
+      id: installToken.serverId,
+      name,
+      customName: installToken.name,
+      username,
+      host,
+      agentUrl: safeString(input.agentUrl) || buildAgentUrl(host),
+      token: serverToken,
+      location,
+      tags: Array.isArray(input.tags) ? input.tags.map(String) : [],
+      status: "online",
+      lastSeenAt: createdAt,
+      createdAt,
+      updatedAt: createdAt,
+      lastSnapshot: input.hostname
+        ? { hostname: String(input.hostname), collectedAt: createdAt }
+        : undefined
+    };
+
+    this.save({
+      servers: [
+        server,
+        ...this.data.servers.filter((item) => item.id !== server.id)
+      ],
+      installTokens: this.data.installTokens.map((item) =>
+        item.token === token ? { ...item, usedAt: createdAt } : item
+      )
+    });
+
+    this.appendLog({
+      source: "agent",
+      action: "register_server",
+      serverId: server.id
+    });
+
+    return { serverId: server.id, token: serverToken, name: server.name };
+  }
+
+  @callable()
+  async refreshServer(serverId: string) {
+    const server = this.data.servers.find((item) => item.id === serverId);
+    if (!server) throw new Error("Server not found.");
+
+    const result = await this.callAgent(server, "server_summary");
+    const output = truncate(result.stdout || result.stderr || "");
+    const collectedAt = nowIso();
+    const snapshot: ServerSnapshot = {
+      collectedAt,
+      ...this.parseSnapshot(output)
+    };
+
+    const servers = this.data.servers.map((item) =>
+      item.id === server.id
+        ? {
+            ...item,
+            status: result.ok ? ("online" as const) : ("offline" as const),
+            lastSeenAt: result.ok ? collectedAt : item.lastSeenAt,
+            lastSnapshot: snapshot,
+            updatedAt: collectedAt
+          }
+        : item
+    );
+
+    this.save({ servers });
+    this.appendLog({
+      source: "web",
+      action: "refresh_server",
+      serverId: server.id,
+      output
+    });
+
+    return servers.find((item) => item.id === server.id);
+  }
+
+  @callable()
+  async refreshAllServers() {
+    const results = await Promise.allSettled(
+      this.data.servers.map((server) => this.refreshServer(server.id))
+    );
+    return results.map((result) =>
+      result.status === "fulfilled"
+        ? result.value
+        : { error: result.reason?.message }
+    );
+  }
+
+  @callable()
+  async run(command: string, source: "web" | "telegram" = "web") {
+    const trimmed = command.trim();
+    if (!trimmed) return "请输入运维指令。";
+
+    if (trimmed.startsWith("规则:")) {
+      const rules = trimmed.replace("规则:", "").trim();
+      this.save({ rules });
+      return `[系统] 规则已更新: ${rules}`;
+    }
+
+    const plan = await this.plan(trimmed);
+    if (plan.type === "chat") return `[EdgeButler] ${plan.text}`;
+
+    const server = this.resolveServer(plan.serverId, plan.serverName);
+    if (!server) {
+      return "请指定要操作的 VPS。你可以使用服务器名称、ID，或先在页面端添加服务器。";
+    }
+
+    if (
+      ACTIONS_REQUIRING_TARGET.has(plan.action) &&
+      !plan.target &&
+      !plan.command
+    ) {
+      return `请明确 ${plan.action} 的目标，例如服务名、端口、进程名或 shell 命令。`;
+    }
+
+    if (MUTATING_ACTIONS.has(plan.action) && !plan.needsConfirmation) {
+      return [
+        "该操作可能修改服务器状态，需要二次确认。",
+        `服务器: ${server.name}`,
+        `动作: ${plan.action}`,
+        plan.command ? `命令: ${plan.command}` : `目标: ${plan.target || ""}`,
+        "请在页面端确认后执行，或回复包含“确认执行”的明确指令。"
+      ].join("\n");
+    }
+
+    const result = await this.callAgent(
+      server,
+      plan.action,
+      plan.target,
+      plan.command
+    );
+    const rawOutput = truncate(
+      result.stdout || result.stderr || "命令执行完成，但没有输出。"
+    );
+    const summary = await this.summarize(plan.action, plan.target, rawOutput);
+
+    this.appendLog({
+      source,
+      action: plan.action,
+      target: plan.target,
+      command: plan.command,
+      serverId: server.id,
+      output: rawOutput
+    });
+
+    return [`[执行动作] ${server.name} / ${plan.action}`, "", summary].join(
+      "\n"
+    );
+  }
+
+  private resolveServer(serverId?: string, serverName?: string) {
+    const servers = this.data.servers;
+    if (serverId) return servers.find((server) => server.id === serverId);
+    if (serverName) {
+      const query = serverName.toLowerCase();
+      return servers.find(
+        (server) =>
+          server.name.toLowerCase().includes(query) ||
+          server.customName?.toLowerCase().includes(query) ||
+          server.host.includes(query)
+      );
+    }
+    return servers.length === 1 ? servers[0] : undefined;
+  }
+
+  private async plan(command: string): Promise<ActionPlan> {
+    const serverList = this.data.servers
+      .map(
+        (server) =>
+          `- ${server.id}: ${server.name} (${server.host}, ${server.location})`
+      )
+      .join("\n");
+    const systemPrompt = `
+You are EdgeButler, an AI operations controller for Linux VPS servers.
+Return JSON only. Do not use markdown.
+
+Current user rules:
+${this.data.rules}
+
+Known servers:
+${serverList || "- none"}
+
+Actions:
+- check_memory
+- check_disk
+- check_cpu
+- check_os_version
+- check_network
+- check_docker
+- check_logs
+- check_top_processes
+- check_port, requires target port
+- check_process, requires target process
+- restart_service, requires target service and needsConfirmation true
+- service_health, requires target service
+- server_summary
+- shell, requires command and needsConfirmation true
+
+Return chat for missing target/server.
+JSON format for chat: {"type":"chat","text":"..."}
+JSON format for action: {"type":"action","serverId":"...","serverName":"...","action":"...","target":"...","command":"...","needsConfirmation":false}
+If the user explicitly confirms execution, set needsConfirmation true.
+`;
+
+    const aiResponse = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...this.data.history.slice(-8),
+        { role: "user", content: command }
+      ]
+    });
+
+    const text = String(aiResponse.response || "")
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+
+    try {
+      const parsed = JSON.parse(text) as ActionPlan;
+      return parsed;
+    } catch {
+      return {
+        type: "chat",
+        text: `AI 指令解析失败，请换一种说法。原始输出: ${text}`
+      };
+    }
+  }
+
+  private async summarize(
+    action: string,
+    target: string | undefined,
+    rawOutput: string
+  ) {
+    const summaryRes = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+      messages: [
+        {
+          role: "user",
+          content: [
+            `Action: ${action}`,
+            `Target: ${target || "none"}`,
+            "Raw server output:",
+            rawOutput,
+            "Please summarize the result in concise Chinese. Mention errors or empty output directly."
+          ].join("\n")
+        }
+      ]
+    });
+    return String(summaryRes.response || rawOutput);
+  }
+
+  private async callAgent(
+    server: ManagedServer,
+    action: string,
+    target = "",
+    command = ""
+  ): Promise<{ ok: boolean; stdout?: string; stderr?: string; code?: number }> {
+    const response = await fetch(
+      `${server.agentUrl.replace(/\/+$/, "")}/api/run`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "EdgeButler/2.0 Cloudflare-Worker"
+        },
+        body: JSON.stringify({
+          token: server.token,
+          action,
+          target,
+          command
+        })
+      }
+    );
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        stderr: `HTTP ${response.status}: ${await response.text()}`
+      };
+    }
+
+    const data = (await response.json()) as {
+      stdout?: string;
+      stderr?: string;
+      code?: number;
+    };
+    return { ok: data.code === undefined || data.code === 0, ...data };
+  }
+
+  private parseSnapshot(output: string): Partial<ServerSnapshot> {
+    const lines = output.split("\n");
+    const find = (prefix: string) =>
+      lines
+        .find((line) => line.startsWith(`${prefix}:`))
+        ?.slice(prefix.length + 1)
+        .trim();
+    return {
+      hostname: find("hostname"),
+      os: find("os"),
+      uptime: find("uptime"),
+      load: find("load"),
+      memory: find("memory"),
+      disk: find("disk")
+    };
+  }
+}
+
+function getController(env: Env) {
+  const id = env.EdgeButler.idFromName("controller");
+  return env.EdgeButler.get(id) as DurableObjectStub & {
+    listServers(): Promise<unknown>;
+    listOperations(): Promise<unknown>;
+    createInstallToken(input?: unknown): Promise<InstallToken>;
+    registerServer(input: unknown): Promise<unknown>;
+    refreshServer(serverId: string): Promise<unknown>;
+    refreshAllServers(): Promise<unknown>;
+    run(command: string, source?: "web" | "telegram"): Promise<string>;
+  };
+}
+
+async function handleApi(request: Request, env: Env) {
+  const url = new URL(request.url);
+  const controller = getController(env);
+
+  if (url.pathname === "/api/servers" && request.method === "GET") {
+    return json(await controller.listServers());
+  }
+
+  if (url.pathname === "/api/operations" && request.method === "GET") {
+    return json(await controller.listOperations());
+  }
+
+  if (url.pathname === "/api/install-token" && request.method === "POST") {
+    const body = await readJson(request);
+    const token = await controller.createInstallToken(body);
+    const origin = `${url.protocol}//${url.host}`;
+    return json({
+      ...token,
+      installCommand: `curl -fsSL "${origin}/install.sh?token=${token.token}" | sudo bash`
+    });
+  }
+
+  if (url.pathname === "/api/agent/register" && request.method === "POST") {
+    return json(await controller.registerServer(await readJson(request)));
+  }
+
+  if (
+    url.pathname.match(/^\/api\/servers\/[^/]+\/refresh$/) &&
+    request.method === "POST"
+  ) {
+    const serverId = decodeURIComponent(url.pathname.split("/")[3]);
+    return json(await controller.refreshServer(serverId));
+  }
+
+  if (
+    url.pathname === "/api/servers/refresh-all" &&
+    request.method === "POST"
+  ) {
+    return json(await controller.refreshAllServers());
+  }
+
+  if (url.pathname === "/api/ai/run" && request.method === "POST") {
+    const body = await readJson(request);
+    return json({
+      text: await controller.run(safeString(body.command), "web")
+    });
+  }
+
+  return json({ error: "Not found" }, { status: 404 });
+}
+
+function installScript(origin: string, token: string) {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+ENDPOINT="${origin}"
+INSTALL_TOKEN="${token}"
+INSTALL_DIR="/opt/edgebutler"
+SERVICE_FILE="/etc/systemd/system/edgebutler-agent.service"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Please run as root or with sudo."
+  exit 1
+fi
+
+apt-get update
+apt-get install -y python3 python3-venv python3-pip curl
+mkdir -p "$INSTALL_DIR"
+
+cat > "$INSTALL_DIR/agent.py" <<'PY'
+${VPS_AGENT_SOURCE.replace(/\$/g, "\\$")}
+PY
+
+cat > "$INSTALL_DIR/config.env" <<EOF
+EDGEBUTLER_ENDPOINT=$ENDPOINT
+EDGEBUTLER_INSTALL_TOKEN=$INSTALL_TOKEN
+EDGEBUTLER_PORT=8080
+EOF
+
+python3 -m venv "$INSTALL_DIR/venv"
+"$INSTALL_DIR/venv/bin/pip" install --upgrade pip flask requests
+
+cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=EdgeButler Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/config.env
+ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/agent.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now edgebutler-agent
+echo "EdgeButler agent installed."
+`;
+}
+
+const VPS_AGENT_SOURCE = String.raw`from flask import Flask, request, jsonify
+import os
+import platform
+import socket
+import subprocess
+import requests
+
+app = Flask(__name__)
+
+ENDPOINT = os.environ.get("EDGEBUTLER_ENDPOINT", "").rstrip("/")
+INSTALL_TOKEN = os.environ.get("EDGEBUTLER_INSTALL_TOKEN", "")
+AGENT_TOKEN = os.environ.get("EDGEBUTLER_AGENT_TOKEN", "")
+PORT = int(os.environ.get("EDGEBUTLER_PORT", "8080"))
+
+ACTIONS = {
+    "check_memory": "free -m",
+    "check_disk": "df -h",
+    "check_os_version": "cat /etc/os-release",
+    "check_cpu": "top -bn1 | head -n 10",
+    "check_network": "ping -c 4 8.8.8.8",
+    "check_docker": "docker ps",
+    "check_logs": "journalctl -n 80 --no-pager",
+    "check_top_processes": "ps aux --sort=-%cpu | head -n 15",
+    "check_port": "ss -lntp | grep '{target}'",
+    "check_process": "ps aux | grep '{target}' | grep -v grep",
+    "restart_service": "systemctl restart '{target}'",
+    "service_health": "systemctl status '{target}' --no-pager; journalctl -u '{target}' -n 60 --no-pager",
+    "server_summary": "printf 'hostname: '; hostname; printf 'os: '; . /etc/os-release && echo $PRETTY_NAME; printf 'uptime: '; uptime -p; printf 'load: '; cat /proc/loadavg; printf 'memory: '; free -m | awk 'NR==2{print $3\"/\"$2\" MB\"}'; printf 'disk: '; df -h / | awk 'NR==2{print $3\"/\"$2\" used, \"$5}'"
+}
+
+def run_command(cmd):
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+    return {"stdout": result.stdout, "stderr": result.stderr, "code": result.returncode}
+
+def register():
+    global AGENT_TOKEN
+    if not ENDPOINT or not INSTALL_TOKEN or AGENT_TOKEN:
+        return
+    payload = {
+        "installToken": INSTALL_TOKEN,
+        "host": requests.get("https://api.ipify.org", timeout=10).text.strip(),
+        "username": os.environ.get("USER", "root"),
+        "hostname": socket.gethostname(),
+        "location": "unknown",
+        "agentUrl": f"http://{requests.get('https://api.ipify.org', timeout=10).text.strip()}.nip.io:{PORT}",
+    }
+    response = requests.post(f"{ENDPOINT}/api/agent/register", json=payload, timeout=20)
+    response.raise_for_status()
+    data = response.json()
+    AGENT_TOKEN = data["token"]
+    with open("/opt/edgebutler/config.env", "a", encoding="utf-8") as file:
+        file.write(f"\nEDGEBUTLER_AGENT_TOKEN={AGENT_TOKEN}\n")
+
+@app.route("/api/run", methods=["POST"])
+def api_run():
+    data = request.get_json(force=True, silent=True) or {}
+    if data.get("token") != AGENT_TOKEN:
+        return jsonify({"error": "unauthorized"}), 401
+    action = data.get("action", "")
+    target = str(data.get("target", ""))
+    command = str(data.get("command", ""))
+    if action == "shell":
+        if not command:
+            return jsonify({"error": "command is required"}), 400
+        return jsonify(run_command(command))
+    if action not in ACTIONS:
+        return jsonify({"error": f"unsupported action: {action}"}), 400
+    template = ACTIONS[action]
+    if "{target}" in template:
+        if not target:
+            return jsonify({"error": "target is required"}), 400
+        command = template.replace("{target}", target.replace("'", "'\\''"))
+    else:
+        command = template
+    return jsonify(run_command(command))
+
+if __name__ == "__main__":
+    register()
+    app.run(host="0.0.0.0", port=PORT)
+`;
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const url = new URL(request.url);
+
+    try {
+      if (url.pathname.startsWith("/api/")) {
+        return await handleApi(request, env);
+      }
+
+      if (url.pathname === "/install.sh" && request.method === "GET") {
+        const token = safeString(url.searchParams.get("token"));
+        if (!token) return new Response("missing token", { status: 400 });
+        return new Response(
+          installScript(`${url.protocol}//${url.host}`, token),
+          {
+            headers: { "Content-Type": "text/x-shellscript; charset=utf-8" }
+          }
+        );
+      }
+
+      if (url.pathname === "/telegram" && request.method === "POST") {
+        const update = (await request.json()) as {
+          message?: { chat?: { id?: number | string }; text?: string };
+        };
+        const chatId = update.message?.chat?.id;
+        const text = update.message?.text;
+        if (chatId && text && env.TELEGRAM_BOT_TOKEN) {
+          const reply = await getController(env).run(text, "telegram");
+          await sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, reply);
+        }
+        return new Response("OK");
+      }
+
+      return (
+        (await routeAgentRequest(request, env)) ??
+        new Response("Not Found", { status: 404 })
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return json({ error: message }, { status: 500 });
+    }
   }
 };
