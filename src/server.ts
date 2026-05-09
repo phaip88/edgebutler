@@ -440,6 +440,24 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   }
 
   @callable()
+  async getRules() {
+    return { rules: this.data.rules };
+  }
+
+  @callable()
+  async updateRules(input: { rules?: string }) {
+    const rules =
+      safeString(input.rules) ||
+      "Prefer safe built-in actions. Shell commands require user confirmation.";
+    this.save({ rules });
+    this.appendLog({
+      source: "web",
+      action: "update_ai_rules"
+    });
+    return { rules };
+  }
+
+  @callable()
   async updateServer(
     serverId: string,
     input: {
@@ -1305,6 +1323,8 @@ function getController(env: Env) {
   const id = env.EdgeButler.idFromName("controller");
   return env.EdgeButler.get(id) as DurableObjectStub & {
     listServers(): Promise<unknown>;
+    getRules(): Promise<unknown>;
+    updateRules(input: unknown): Promise<unknown>;
     updateServer(serverId: string, input: unknown): Promise<unknown>;
     deleteServer(serverId: string): Promise<unknown>;
     listOperations(): Promise<unknown>;
@@ -1385,6 +1405,14 @@ async function handleApi(request: Request, env: Env) {
     return json(await controller.listServers());
   }
 
+  if (url.pathname === "/api/rules" && request.method === "GET") {
+    return json(await controller.getRules());
+  }
+
+  if (url.pathname === "/api/rules" && request.method === "PATCH") {
+    return json(await controller.updateRules(await readJson(request)));
+  }
+
   if (
     url.pathname.match(/^\/api\/servers\/[^/]+$/) &&
     request.method === "PATCH"
@@ -1452,7 +1480,7 @@ async function handleApi(request: Request, env: Env) {
     const origin = `${url.protocol}//${url.host}`;
     return json({
       ...token,
-      installCommand: `curl -fsSL "${origin}/install.sh?token=${token.token}" | sudo bash`
+      installCommand: `curl -fsSL '${origin}/install.sh?token=${token.token}' | sudo bash`
     });
   }
 

@@ -76,6 +76,10 @@ type AuthStatus = {
   authConfigured: boolean;
 };
 
+type RulesResponse = {
+  rules: string;
+};
+
 type Language = "zh" | "en";
 
 const text = {
@@ -114,6 +118,11 @@ const text = {
     aiOps: "AI Operations",
     aiOpsHelp:
       "Ask for diagnostics or operations. Mutating actions require web confirmation.",
+    aiRules: "AI System Rules",
+    aiRulesHelp:
+      "These rules are injected into the AI planning prompt for every web and Telegram command.",
+    saveRules: "Save rules",
+    rulesSaved: "AI system rules saved.",
     runAi: "Run AI command",
     pendingTitle: "Pending Confirmations",
     pendingHelp: "Mutating operations expire after 10 minutes.",
@@ -173,6 +182,10 @@ const text = {
     expires: "过期时间",
     aiOps: "AI 运维",
     aiOpsHelp: "输入诊断或运维指令。变更操作必须在页面端二次确认。",
+    aiRules: "AI 系统规则",
+    aiRulesHelp: "这些规则会注入每一次网页端和 Telegram 指令的 AI 规划提示词。",
+    saveRules: "保存规则",
+    rulesSaved: "AI 系统规则已保存。",
     runAi: "执行 AI 指令",
     pendingTitle: "待确认操作",
     pendingHelp: "变更操作 10 分钟后过期。",
@@ -304,6 +317,7 @@ export default function App() {
     botToken: "",
     chatId: ""
   });
+  const [rules, setRules] = useState("");
   const [aiCommand, setAiCommand] = useState("");
   const [aiOutput, setAiOutput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -330,17 +344,24 @@ export default function App() {
   );
 
   async function reload() {
-    const [serverData, operationData, pendingData, notificationData] =
-      await Promise.all([
-        api<ManagedServer[]>("/api/servers"),
-        api<OperationLog[]>("/api/operations"),
-        api<PendingOperation[]>("/api/pending-operations"),
-        api<NotificationChannel[]>("/api/notifications")
-      ]);
+    const [
+      serverData,
+      operationData,
+      pendingData,
+      notificationData,
+      rulesData
+    ] = await Promise.all([
+      api<ManagedServer[]>("/api/servers"),
+      api<OperationLog[]>("/api/operations"),
+      api<PendingOperation[]>("/api/pending-operations"),
+      api<NotificationChannel[]>("/api/notifications"),
+      api<RulesResponse>("/api/rules")
+    ]);
     setServers(serverData);
     setOperations(operationData);
     setPendingOperations(pendingData);
     setNotifications(notificationData);
+    setRules(rulesData.rules);
   }
 
   async function withLoading(task: () => Promise<void>) {
@@ -462,6 +483,18 @@ export default function App() {
         body: JSON.stringify({ command })
       });
       setAiOutput(result.text);
+      await reload();
+    });
+  }
+
+  function saveRules() {
+    void withLoading(async () => {
+      const result = await api<RulesResponse>("/api/rules", {
+        method: "PATCH",
+        body: JSON.stringify({ rules })
+      });
+      setRules(result.rules);
+      setNotice(t.rulesSaved);
       await reload();
     });
   }
@@ -864,6 +897,25 @@ export default function App() {
                 </button>
               </div>
               {aiOutput && <pre className="output">{aiOutput}</pre>}
+            </div>
+
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <h2>{t.aiRules}</h2>
+                  <p>{t.aiRulesHelp}</p>
+                </div>
+              </div>
+              <textarea
+                value={rules}
+                onChange={(event) => setRules(event.target.value)}
+                placeholder="Prefer safe built-in actions. Shell commands require user confirmation."
+              />
+              <div className="button-row">
+                <button disabled={loading} onClick={saveRules}>
+                  {t.saveRules}
+                </button>
+              </div>
             </div>
           </section>
 
