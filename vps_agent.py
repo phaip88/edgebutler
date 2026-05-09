@@ -17,6 +17,7 @@ INSTALL_TOKEN = os.environ.get("EDGEBUTLER_INSTALL_TOKEN", "")
 AGENT_TOKEN = os.environ.get("EDGEBUTLER_AGENT_TOKEN", "")
 SERVER_ID = os.environ.get("EDGEBUTLER_SERVER_ID", "")
 PORT = int(os.environ.get("EDGEBUTLER_PORT", "8080"))
+ENABLE_HTTP = os.environ.get("EDGEBUTLER_ENABLE_HTTP", "0") == "1"
 
 ACTIONS = {
     "check_memory": "free -m",
@@ -171,5 +172,8 @@ def api_run():
 
 if __name__ == "__main__":
     register()
-    threading.Thread(target=poll_loop, daemon=True).start()
-    app.run(host="0.0.0.0", port=PORT)
+    if ENABLE_HTTP:
+        threading.Thread(target=poll_loop, daemon=True).start()
+        app.run(host="0.0.0.0", port=PORT)
+    else:
+        poll_loop()

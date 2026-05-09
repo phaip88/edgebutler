@@ -1452,6 +1452,8 @@ if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   systemctl enable --now edgebutler-agent
   echo "EdgeButler agent installed and started with systemd."
 else
+  pkill -f "/opt/edgebutler/agent.py" >/dev/null 2>&1 || true
+
   if [ -f /etc/zo/supervisord-user.conf ] && command -v supervisorctl >/dev/null 2>&1; then
     SUPERVISOR_CONF="/etc/zo/supervisord-user.conf"
   elif [ -d /etc/supervisor/conf.d ] && command -v supervisorctl >/dev/null 2>&1; then
@@ -1564,17 +1566,21 @@ EOF
     update-rc.d edgebutler-agent defaults >/dev/null 2>&1 || true
   fi
 
-  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
-    kill "$(cat "$PID_FILE")" || true
+  if [ -z "$SUPERVISOR_CONF" ]; then
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
+      kill "$(cat "$PID_FILE")" || true
+    fi
+    if command -v service >/dev/null 2>&1; then
+      service edgebutler-agent restart || true
+    fi
+    if ! [ -f "$PID_FILE" ] || ! kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
+      nohup "$RUNNER_FILE" > "$LOG_FILE" 2> "$ERR_LOG_FILE" &
+      echo $! > "$PID_FILE"
+    fi
+    echo "EdgeButler agent installed with init.d fallback. PID: $(cat "$PID_FILE"), log: $LOG_FILE"
+  else
+    echo "EdgeButler agent lifecycle is managed by supervisord."
   fi
-  if command -v service >/dev/null 2>&1; then
-    service edgebutler-agent restart || true
-  fi
-  if ! [ -f "$PID_FILE" ] || ! kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
-    nohup "$RUNNER_FILE" > "$LOG_FILE" 2> "$ERR_LOG_FILE" &
-    echo $! > "$PID_FILE"
-  fi
-  echo "EdgeButler agent installed with init.d fallback. PID: $(cat "$PID_FILE"), log: $LOG_FILE"
 fi
 `;
 }
@@ -1595,6 +1601,7 @@ INSTALL_TOKEN = os.environ.get("EDGEBUTLER_INSTALL_TOKEN", "")
 AGENT_TOKEN = os.environ.get("EDGEBUTLER_AGENT_TOKEN", "")
 SERVER_ID = os.environ.get("EDGEBUTLER_SERVER_ID", "")
 PORT = int(os.environ.get("EDGEBUTLER_PORT", "8080"))
+ENABLE_HTTP = os.environ.get("EDGEBUTLER_ENABLE_HTTP", "0") == "1"
 
 @app.get("/health")
 def health():
@@ -1712,8 +1719,11 @@ def api_run():
 
 if __name__ == "__main__":
     register()
-    threading.Thread(target=poll_loop, daemon=True).start()
-    app.run(host="0.0.0.0", port=PORT)
+    if ENABLE_HTTP:
+        threading.Thread(target=poll_loop, daemon=True).start()
+        app.run(host="0.0.0.0", port=PORT)
+    else:
+        poll_loop()
 `;
 
 export default {

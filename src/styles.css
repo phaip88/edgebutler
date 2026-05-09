@@ -421,6 +421,16 @@ h3 {
   color: #872b1f;
 }
 
+.notice {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #a9d49e;
+  border-radius: 22px;
+  background: #f0ffe9;
+  color: #275d25;
+  font-weight: 750;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;

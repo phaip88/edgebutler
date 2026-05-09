@@ -127,6 +127,9 @@ const text = {
     saveChannel: "Save channel",
     saveAndTest: "Save and test",
     test: "Test",
+    editChannel: "Edit",
+    channelSaved: "Notification channel saved.",
+    channelTested: "Notification test sent.",
     audit: "Operation Audit",
     auditHelp: "Recent web, Telegram, agent, and system actions.",
     noOps: "No operations yet.",
@@ -182,6 +185,9 @@ const text = {
     saveChannel: "保存渠道",
     saveAndTest: "保存并测试",
     test: "测试",
+    editChannel: "编辑",
+    channelSaved: "通知渠道已保存。",
+    channelTested: "通知测试已发送。",
     audit: "操作审计",
     auditHelp: "最近的页面、Telegram、agent 和系统操作。",
     noOps: "暂无操作记录。",
@@ -288,6 +294,7 @@ export default function App() {
     location: ""
   });
   const [notificationForm, setNotificationForm] = useState({
+    id: "",
     name: "",
     type: "wecom" as NotificationChannel["type"],
     url: "",
@@ -298,6 +305,7 @@ export default function App() {
   const [aiOutput, setAiOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const t = text[language];
 
   const onlineCount = useMemo(
@@ -335,6 +343,7 @@ export default function App() {
   async function withLoading(task: () => Promise<void>) {
     setLoading(true);
     setError("");
+    setNotice("");
     try {
       await task();
     } catch (err) {
@@ -482,12 +491,14 @@ export default function App() {
         body: JSON.stringify(notificationForm)
       });
       setNotificationForm({
+        id: "",
         name: "",
         type: "wecom",
         url: "",
         botToken: "",
         chatId: ""
       });
+      setNotice(t.channelSaved);
       await reload();
     });
   }
@@ -502,12 +513,14 @@ export default function App() {
         method: "POST"
       });
       setNotificationForm({
+        id: "",
         name: "",
         type: "wecom",
         url: "",
         botToken: "",
         chatId: ""
       });
+      setNotice(t.channelTested);
       await reload();
     });
   }
@@ -517,7 +530,23 @@ export default function App() {
       await api(`/api/notifications/${encodeURIComponent(channelId)}/test`, {
         method: "POST"
       });
+      setNotice(t.channelTested);
       await reload();
+    });
+  }
+
+  function editNotification(channel: NotificationChannel) {
+    setNotificationForm({
+      id: channel.id,
+      name: channel.name,
+      type: channel.type,
+      url: channel.url || "",
+      botToken: channel.botToken || "",
+      chatId: channel.chatId || ""
+    });
+    document.getElementById("notifications")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
     });
   }
 
@@ -648,6 +677,7 @@ export default function App() {
           </section>
 
           {error && <div className="alert">{error}</div>}
+          {notice && <div className="notice">{notice}</div>}
 
           <section className="panel fleet-panel" id="fleet">
             <div className="panel-header">
@@ -898,19 +928,21 @@ export default function App() {
                   <option value="generic_webhook">Generic webhook</option>
                 </select>
               </label>
-              <label>
-                {t.webhookUrl}
-                <input
-                  value={notificationForm.url}
-                  onChange={(event) =>
-                    setNotificationForm((current) => ({
-                      ...current,
-                      url: event.target.value
-                    }))
-                  }
-                  placeholder="https://..."
-                />
-              </label>
+              {notificationForm.type !== "telegram" && (
+                <label>
+                  {t.webhookUrl}
+                  <input
+                    value={notificationForm.url}
+                    onChange={(event) =>
+                      setNotificationForm((current) => ({
+                        ...current,
+                        url: event.target.value
+                      }))
+                    }
+                    placeholder="https://..."
+                  />
+                </label>
+              )}
               {notificationForm.type === "telegram" && (
                 <label>
                   {t.botToken}
@@ -969,6 +1001,13 @@ export default function App() {
                         onClick={() => testNotification(channel.id)}
                       >
                         {t.test}
+                      </button>
+                      <button
+                        className="secondary"
+                        disabled={loading}
+                        onClick={() => editNotification(channel)}
+                      >
+                        {t.editChannel}
                       </button>
                       <button
                         className="secondary"
