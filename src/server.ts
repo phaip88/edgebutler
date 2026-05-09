@@ -542,6 +542,27 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   }
 
   @callable()
+  async handleTelegramMessage(chatId: string | number, text: string) {
+    const normalizedChatId = String(chatId);
+    const channel = this.data.notificationChannels.find(
+      (item) =>
+        item.type === "telegram" &&
+        item.enabled &&
+        String(item.chatId || "") === normalizedChatId
+    );
+    const token = channel?.botToken || this.env.TELEGRAM_BOT_TOKEN;
+    if (!token) {
+      throw new Error(
+        "Telegram bot token is missing. Configure a Telegram notification channel or TELEGRAM_BOT_TOKEN."
+      );
+    }
+
+    const reply = await this.run(text, "telegram");
+    await sendTelegram(token, normalizedChatId, reply);
+    return { ok: true };
+  }
+
+  @callable()
   async listPendingOperations() {
     const pendingOperations = this.data.pendingOperations.filter(
       (item) => Date.parse(item.expiresAt) > Date.now()
@@ -1189,6 +1210,10 @@ function getController(env: Env) {
     saveNotificationChannel(input: unknown): Promise<unknown>;
     deleteNotificationChannel(channelId: string): Promise<unknown>;
     testNotificationChannel(channelId: string): Promise<unknown>;
+    handleTelegramMessage(
+      chatId: string | number,
+      text: string
+    ): Promise<unknown>;
     createInstallToken(input?: unknown): Promise<InstallToken>;
     registerServer(input: unknown): Promise<unknown>;
     pollAgent(input: unknown): Promise<unknown>;
@@ -1752,9 +1777,8 @@ export default {
         };
         const chatId = update.message?.chat?.id;
         const text = update.message?.text;
-        if (chatId && text && env.TELEGRAM_BOT_TOKEN) {
-          const reply = await getController(env).run(text, "telegram");
-          await sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, reply);
+        if (chatId && text) {
+          await getController(env).handleTelegramMessage(chatId, text);
         }
         return new Response("OK");
       }
