@@ -93,6 +93,9 @@ type NotificationChannel = {
   url?: string;
   botToken?: string;
   chatId?: string;
+  telegramWebhookUrl?: string;
+  telegramWebhookStatus?: string;
+  telegramWebhookUpdatedAt?: string;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -308,11 +311,39 @@ async function sendTelegram(
   chatId: number | string,
   text: string
 ) {
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ chat_id: chatId, text })
-  });
+  const response = await fetch(
+    `https://api.telegram.org/bot${token}/sendMessage`,
+    {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ chat_id: chatId, text })
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`Telegram send failed: HTTP ${response.status}`);
+  }
+}
+
+async function setTelegramWebhook(token: string, webhookUrl: string) {
+  const response = await fetch(
+    `https://api.telegram.org/bot${token}/setWebhook`,
+    {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ url: webhookUrl })
+    }
+  );
+  const data = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    description?: string;
+  };
+  if (!response.ok || !data.ok) {
+    throw new Error(
+      data.description ||
+        `Telegram webhook setup failed: HTTP ${response.status}`
+    );
+  }
+  return data.description || "Webhook was set.";
 }
 
 export class EdgeButler extends Agent<Env, EdgeButlerState> {
@@ -479,6 +510,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     url?: string;
     botToken?: string;
     chatId?: string;
+    webhookOrigin?: string;
     enabled?: boolean;
   }) {
     const now = nowIso();
@@ -493,10 +525,26 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       url: safeString(input.url) || existing?.url,
       botToken: safeString(input.botToken) || existing?.botToken,
       chatId: safeString(input.chatId) || existing?.chatId,
+      telegramWebhookUrl: existing?.telegramWebhookUrl,
+      telegramWebhookStatus: existing?.telegramWebhookStatus,
+      telegramWebhookUpdatedAt: existing?.telegramWebhookUpdatedAt,
       enabled: input.enabled ?? existing?.enabled ?? true,
       createdAt: existing?.createdAt || now,
       updatedAt: now
     };
+    if (channel.type === "telegram") {
+      const token = channel.botToken || this.env.TELEGRAM_BOT_TOKEN;
+      const origin = safeString(input.webhookOrigin);
+      if (token && origin) {
+        const webhookUrl = `${origin.replace(/\/+$/, "")}/telegram`;
+        channel.telegramWebhookUrl = webhookUrl;
+        channel.telegramWebhookStatus = await setTelegramWebhook(
+          token,
+          webhookUrl
+        );
+        channel.telegramWebhookUpdatedAt = now;
+      }
+    }
     this.save({
       notificationChannels: [
         channel,
@@ -527,18 +575,43 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   }
 
   @callable()
-  async testNotificationChannel(channelId: string) {
+  async testNotificationChannel(channelId: string, webhookOrigin?: string) {
     const channel = this.data.notificationChannels.find(
       (item) => item.id === channelId
     );
     if (!channel) throw new Error("Notification channel not found.");
+    let telegramWebhookUrl: string | undefined;
+    let telegramWebhookStatus: string | undefined;
+    if (channel.type === "telegram") {
+      const token = channel.botToken || this.env.TELEGRAM_BOT_TOKEN;
+      const origin = safeString(webhookOrigin);
+      if (token && origin) {
+        const webhookUrl = `${origin.replace(/\/+$/, "")}/telegram`;
+        const status = await setTelegramWebhook(token, webhookUrl);
+        telegramWebhookUrl = webhookUrl;
+        telegramWebhookStatus = status;
+        const updatedAt = nowIso();
+        this.save({
+          notificationChannels: this.data.notificationChannels.map((item) =>
+            item.id === channelId
+              ? {
+                  ...item,
+                  telegramWebhookUrl: webhookUrl,
+                  telegramWebhookStatus: status,
+                  telegramWebhookUpdatedAt: updatedAt
+                }
+              : item
+          )
+        });
+      }
+    }
     await this.sendNotification(channel, "EdgeButler test notification.");
     this.appendLog({
       source: "web",
       action: "test_notification_channel",
       target: channel.name
     });
-    return { ok: true };
+    return { ok: true, telegramWebhookUrl, telegramWebhookStatus };
   }
 
   @callable()
@@ -1209,7 +1282,10 @@ function getController(env: Env) {
     listNotificationChannels(): Promise<unknown>;
     saveNotificationChannel(input: unknown): Promise<unknown>;
     deleteNotificationChannel(channelId: string): Promise<unknown>;
-    testNotificationChannel(channelId: string): Promise<unknown>;
+    testNotificationChannel(
+      channelId: string,
+      webhookOrigin?: string
+    ): Promise<unknown>;
     handleTelegramMessage(
       chatId: string | number,
       text: string
@@ -1309,8 +1385,12 @@ async function handleApi(request: Request, env: Env) {
   }
 
   if (url.pathname === "/api/notifications" && request.method === "POST") {
+    const body = await readJson(request);
     return json(
-      await controller.saveNotificationChannel(await readJson(request))
+      await controller.saveNotificationChannel({
+        ...body,
+        webhookOrigin: `${url.protocol}//${url.host}`
+      })
     );
   }
 
@@ -1327,7 +1407,12 @@ async function handleApi(request: Request, env: Env) {
     request.method === "POST"
   ) {
     const channelId = decodeURIComponent(url.pathname.split("/")[3]);
-    return json(await controller.testNotificationChannel(channelId));
+    return json(
+      await controller.testNotificationChannel(
+        channelId,
+        `${url.protocol}//${url.host}`
+      )
+    );
   }
 
   if (url.pathname === "/api/install-token" && request.method === "POST") {

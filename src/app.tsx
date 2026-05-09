@@ -56,6 +56,9 @@ type NotificationChannel = {
   url?: string;
   botToken?: string;
   chatId?: string;
+  telegramWebhookUrl?: string;
+  telegramWebhookStatus?: string;
+  telegramWebhookUpdatedAt?: string;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -486,7 +489,7 @@ export default function App() {
 
   function saveNotification() {
     void withLoading(async () => {
-      await api("/api/notifications", {
+      const channel = await api<NotificationChannel>("/api/notifications", {
         method: "POST",
         body: JSON.stringify(notificationForm)
       });
@@ -498,7 +501,11 @@ export default function App() {
         botToken: "",
         chatId: ""
       });
-      setNotice(t.channelSaved);
+      setNotice(
+        channel.telegramWebhookUrl
+          ? `${t.channelSaved} Telegram webhook: ${channel.telegramWebhookUrl}`
+          : t.channelSaved
+      );
       await reload();
     });
   }
@@ -520,17 +527,28 @@ export default function App() {
         botToken: "",
         chatId: ""
       });
-      setNotice(t.channelTested);
+      setNotice(
+        channel.telegramWebhookUrl
+          ? `${t.channelTested} Telegram webhook: ${channel.telegramWebhookUrl}`
+          : t.channelTested
+      );
       await reload();
     });
   }
 
   function testNotification(channelId: string) {
     void withLoading(async () => {
-      await api(`/api/notifications/${encodeURIComponent(channelId)}/test`, {
+      const result = await api<{
+        ok: boolean;
+        telegramWebhookUrl?: string;
+      }>(`/api/notifications/${encodeURIComponent(channelId)}/test`, {
         method: "POST"
       });
-      setNotice(t.channelTested);
+      setNotice(
+        result.telegramWebhookUrl
+          ? `${t.channelTested} Telegram webhook: ${result.telegramWebhookUrl}`
+          : t.channelTested
+      );
       await reload();
     });
   }
@@ -993,6 +1011,18 @@ export default function App() {
                     <div>
                       <strong>{channel.name}</strong>
                       <p>{channel.type}</p>
+                      {channel.type === "telegram" &&
+                        channel.telegramWebhookUrl && (
+                          <p className="muted">
+                            Webhook: {channel.telegramWebhookUrl}
+                          </p>
+                        )}
+                      {channel.type === "telegram" &&
+                        channel.telegramWebhookStatus && (
+                          <p className="muted">
+                            {channel.telegramWebhookStatus}
+                          </p>
+                        )}
                     </div>
                     <div className="button-row">
                       <button
