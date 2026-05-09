@@ -1392,6 +1392,9 @@ SERVICE_FILE="/etc/systemd/system/edgebutler-agent.service"
 RUNNER_FILE="$INSTALL_DIR/run-agent.sh"
 PID_FILE="$INSTALL_DIR/agent.pid"
 LOG_FILE="$INSTALL_DIR/agent.log"
+ERR_LOG_FILE="$INSTALL_DIR/agent.err"
+INIT_FILE="/etc/init.d/edgebutler-agent"
+SUPERVISOR_CONF=""
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run as root or with sudo."
@@ -1449,12 +1452,129 @@ if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   systemctl enable --now edgebutler-agent
   echo "EdgeButler agent installed and started with systemd."
 else
+  if [ -f /etc/zo/supervisord-user.conf ] && command -v supervisorctl >/dev/null 2>&1; then
+    SUPERVISOR_CONF="/etc/zo/supervisord-user.conf"
+  elif [ -d /etc/supervisor/conf.d ] && command -v supervisorctl >/dev/null 2>&1; then
+    SUPERVISOR_CONF="/etc/supervisor/conf.d/edgebutler-agent.conf"
+    cat > "$SUPERVISOR_CONF" <<EOF
+[program:edgebutler-agent]
+command=$RUNNER_FILE
+directory=$INSTALL_DIR
+autostart=true
+autorestart=true
+startretries=20
+startsecs=3
+stopsignal=TERM
+stopasgroup=true
+killasgroup=true
+stdout_logfile=$LOG_FILE
+stderr_logfile=$ERR_LOG_FILE
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=3
+stderr_logfile_maxbytes=10MB
+stderr_logfile_backups=3
+EOF
+  fi
+
+  if [ "$SUPERVISOR_CONF" = "/etc/zo/supervisord-user.conf" ] && ! grep -q "\\[program:edgebutler-agent\\]" "$SUPERVISOR_CONF"; then
+    cat >> "$SUPERVISOR_CONF" <<EOF
+
+[program:edgebutler-agent]
+command=$RUNNER_FILE
+directory=$INSTALL_DIR
+environment=
+autostart=true
+autorestart=true
+stopsignal=TERM
+stopasgroup=true
+killasgroup=true
+startretries=20
+startsecs=3
+stopwaitsecs=5
+stdout_logfile=$LOG_FILE
+stderr_logfile=$ERR_LOG_FILE
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=3
+stderr_logfile_maxbytes=10MB
+stderr_logfile_backups=3
+EOF
+  fi
+
+  if [ -n "$SUPERVISOR_CONF" ]; then
+    supervisorctl -c "$SUPERVISOR_CONF" reread || true
+    supervisorctl -c "$SUPERVISOR_CONF" update || true
+    supervisorctl -c "$SUPERVISOR_CONF" restart edgebutler-agent || supervisorctl -c "$SUPERVISOR_CONF" start edgebutler-agent || true
+    echo "EdgeButler agent installed with supervisord autorestart."
+  fi
+
+  cat > "$INIT_FILE" <<'EOF'
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          edgebutler-agent
+# Required-Start:
+# Required-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: EdgeButler Agent
+# Description:       EdgeButler outbound polling VPS agent
+### END INIT INFO
+
+name="edgebutler-agent"
+cmd="/opt/edgebutler/run-agent.sh"
+pid_file="/var/run/edgebutler-agent.pid"
+stdout_log="/opt/edgebutler/agent.log"
+stderr_log="/opt/edgebutler/agent.err"
+
+get_pid() { cat "$pid_file"; }
+is_running() { [ -f "$pid_file" ] && [ -d "/proc/$(get_pid)" ]; }
+
+case "$1" in
+  start)
+    if is_running; then
+      echo "Already started"
+    else
+      echo "Starting $name"
+      cd "/opt/edgebutler"
+      "$cmd" >> "$stdout_log" 2>> "$stderr_log" &
+      echo $! > "$pid_file"
+    fi
+    ;;
+  stop)
+    if is_running; then
+      kill "$(get_pid)" || true
+      rm -f "$pid_file"
+    fi
+    ;;
+  restart)
+    $0 stop
+    $0 start
+    ;;
+  status)
+    if is_running; then echo "Running"; else echo "Stopped"; exit 1; fi
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|status}"
+    exit 1
+    ;;
+esac
+exit 0
+EOF
+  chmod +x "$INIT_FILE"
+  if command -v update-rc.d >/dev/null 2>&1; then
+    update-rc.d edgebutler-agent defaults >/dev/null 2>&1 || true
+  fi
+
   if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
     kill "$(cat "$PID_FILE")" || true
   fi
-  nohup "$RUNNER_FILE" > "$LOG_FILE" 2>&1 &
-  echo $! > "$PID_FILE"
-  echo "EdgeButler agent installed and started without systemd. PID: $(cat "$PID_FILE"), log: $LOG_FILE"
+  if command -v service >/dev/null 2>&1; then
+    service edgebutler-agent restart || true
+  fi
+  if ! [ -f "$PID_FILE" ] || ! kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
+    nohup "$RUNNER_FILE" > "$LOG_FILE" 2> "$ERR_LOG_FILE" &
+    echo $! > "$PID_FILE"
+  fi
+  echo "EdgeButler agent installed with init.d fallback. PID: $(cat "$PID_FILE"), log: $LOG_FILE"
 fi
 `;
 }
