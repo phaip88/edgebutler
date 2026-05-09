@@ -180,6 +180,34 @@ function safeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function normalizeEndpoint(value: string) {
+  const parsed = new URL(value);
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Endpoint must be an HTTP or HTTPS URL.");
+  }
+  return parsed.origin;
+}
+
+function endpointUpdateCommand(endpoint: string) {
+  const quotedEndpoint = shellQuote(endpoint);
+  return [
+    "set -e",
+    `endpoint=${quotedEndpoint}`,
+    "config=/opt/edgebutler/config.env",
+    'test -f "$config"',
+    "tmp=$(mktemp)",
+    'awk -v ep="$endpoint" \'BEGIN{done=0} /^EDGEBUTLER_ENDPOINT=/{print "EDGEBUTLER_ENDPOINT=" ep; done=1; next} {print} END{if(!done) print "EDGEBUTLER_ENDPOINT=" ep}\' "$config" > "$tmp"',
+    'cat "$tmp" > "$config"',
+    'rm -f "$tmp"',
+    "( sleep 3; if [ -f /etc/zo/supervisord-user.conf ] && command -v supervisorctl >/dev/null 2>&1; then supervisorctl -c /etc/zo/supervisord-user.conf restart edgebutler-agent; elif command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then systemctl restart edgebutler-agent; elif command -v service >/dev/null 2>&1; then service edgebutler-agent restart; elif [ -x /etc/init.d/edgebutler-agent ]; then /etc/init.d/edgebutler-agent restart; fi ) >/tmp/edgebutler-endpoint-restart.log 2>&1 &",
+    'echo "Endpoint updated to $endpoint; restart scheduled."'
+  ].join("; ");
+}
+
 function base64Url(input: ArrayBuffer | string) {
   const bytes =
     typeof input === "string"
@@ -963,6 +991,38 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   }
 
   @callable()
+  async createAgentEndpointUpdate(input: { endpoint?: string }) {
+    const endpoint = normalizeEndpoint(safeString(input.endpoint));
+    const onlineServers = this.data.servers.filter(
+      (server) => server.status === "online"
+    );
+    if (onlineServers.length === 0) {
+      throw new Error("No online VPS is available for endpoint update.");
+    }
+    const pending: PendingOperation = {
+      id: randomId("pending"),
+      serverId: "*",
+      serverName: "All online VPS",
+      source: "web",
+      action: "bulk_update_endpoint",
+      target: endpoint,
+      command: endpointUpdateCommand(endpoint),
+      createdAt: nowIso(),
+      expiresAt: new Date(Date.now() + 10 * 60_000).toISOString()
+    };
+    this.save({
+      pendingOperations: [pending, ...this.data.pendingOperations].slice(0, 50)
+    });
+    this.appendLog({
+      source: "web",
+      action: "create_bulk_endpoint_update",
+      target: endpoint,
+      command: pending.command
+    });
+    return { pending, serverCount: onlineServers.length, endpoint };
+  }
+
+  @callable()
   async run(command: string, source: "web" | "telegram" = "web") {
     const trimmed = command.trim();
     if (!trimmed) return "Please enter an operations command.";
@@ -1031,6 +1091,14 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     const server = this.data.servers.find(
       (item) => item.id === pending.serverId
     );
+    if (pending.action === "bulk_update_endpoint") {
+      this.save({
+        pendingOperations: this.data.pendingOperations.filter(
+          (item) => item.id !== operationId
+        )
+      });
+      return await this.executeBulkEndpointUpdate(pending);
+    }
     if (!server) throw new Error("Server not found.");
 
     this.save({
@@ -1061,6 +1129,38 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       target: operationId
     });
     return { ok: true };
+  }
+
+  private async executeBulkEndpointUpdate(pending: PendingOperation) {
+    const endpoint = safeString(pending.target);
+    const command = pending.command || endpointUpdateCommand(endpoint);
+    const servers = this.data.servers.filter(
+      (server) => server.status === "online"
+    );
+    const results = await Promise.allSettled(
+      servers.map(async (server) => {
+        const result = await this.callAgent(server, "shell", "", command);
+        const output = truncate(result.stdout || result.stderr || "");
+        this.appendLog({
+          source: "web",
+          action: "bulk_update_endpoint",
+          target: endpoint,
+          command,
+          serverId: server.id,
+          output
+        });
+        return { server, result, output };
+      })
+    );
+    const lines = results.map((item, index) => {
+      if (item.status === "rejected") {
+        return `- ${servers[index]?.name || "unknown"}: failed - ${item.reason?.message || item.reason}`;
+      }
+      return `- ${item.value.server.name}: ${
+        item.value.result.ok ? "updated" : "failed"
+      } ${item.value.output ? `- ${item.value.output}` : ""}`;
+    });
+    return [`[Endpoint Update] ${endpoint}`, ...lines].join("\n");
   }
 
   private createPendingOperation(
@@ -1347,6 +1447,7 @@ function getController(env: Env) {
     reportAgentResult(input: unknown): Promise<unknown>;
     refreshServer(serverId: string): Promise<unknown>;
     refreshAllServers(): Promise<unknown>;
+    createAgentEndpointUpdate(input: unknown): Promise<unknown>;
     confirmOperation(operationId: string): Promise<string>;
     cancelOperation(operationId: string): Promise<unknown>;
     run(command: string, source?: "web" | "telegram"): Promise<string>;
@@ -1522,6 +1623,15 @@ async function handleApi(request: Request, env: Env) {
     request.method === "POST"
   ) {
     return json(await controller.refreshAllServers());
+  }
+
+  if (
+    url.pathname === "/api/agent-endpoint/update-all" &&
+    request.method === "POST"
+  ) {
+    return json(
+      await controller.createAgentEndpointUpdate(await readJson(request))
+    );
   }
 
   if (url.pathname === "/api/ai/run" && request.method === "POST") {

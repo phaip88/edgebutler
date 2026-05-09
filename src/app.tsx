@@ -104,6 +104,10 @@ const text = {
     reload: "Reload",
     refreshAll: "Refresh all VPS",
     refreshOne: "Refresh this VPS",
+    agentEndpoint: "Agent endpoint",
+    updateAgentEndpoint: "Update all agents",
+    endpointUpdateQueued:
+      "Endpoint update is queued. Confirm it before execution.",
     edit: "Edit",
     delete: "Delete",
     noVps:
@@ -170,6 +174,9 @@ const text = {
     reload: "重新加载",
     refreshAll: "刷新全部 VPS",
     refreshOne: "刷新此 VPS",
+    agentEndpoint: "Agent endpoint",
+    updateAgentEndpoint: "更新全部 Agent",
+    endpointUpdateQueued: "Endpoint 更新已加入待确认，请确认后执行。",
     edit: "编辑",
     delete: "删除",
     noVps: "还没有注册 VPS。请先生成安装命令，并在测试 VPS 上运行。",
@@ -309,6 +316,9 @@ export default function App() {
     username: "root",
     location: ""
   });
+  const [agentEndpoint, setAgentEndpoint] = useState(() =>
+    window.location.origin.replace(/\/+$/, "")
+  );
   const [notificationForm, setNotificationForm] = useState({
     id: "",
     name: "",
@@ -444,6 +454,17 @@ export default function App() {
   function refreshAll() {
     void withLoading(async () => {
       await api("/api/servers/refresh-all", { method: "POST" });
+      await reload();
+    });
+  }
+
+  function createEndpointUpdate() {
+    void withLoading(async () => {
+      await api("/api/agent-endpoint/update-all", {
+        method: "POST",
+        body: JSON.stringify({ endpoint: agentEndpoint })
+      });
+      setNotice(t.endpointUpdateQueued);
       await reload();
     });
   }
@@ -867,6 +888,21 @@ export default function App() {
                   <pre>{installToken.installCommand}</pre>
                 </div>
               )}
+              <label>
+                {t.agentEndpoint}
+                <input
+                  value={agentEndpoint}
+                  onChange={(event) => setAgentEndpoint(event.target.value)}
+                  placeholder="https://ops.example.com"
+                />
+              </label>
+              <button
+                className="secondary"
+                disabled={loading || !agentEndpoint.trim()}
+                onClick={createEndpointUpdate}
+              >
+                {t.updateAgentEndpoint}
+              </button>
             </div>
 
             <div className="panel" id="ai">
