@@ -93,6 +93,7 @@ type NotificationChannel = {
   url?: string;
   botToken?: string;
   chatId?: string;
+  telegramWebhookPath?: string;
   telegramWebhookUrl?: string;
   telegramWebhookStatus?: string;
   telegramWebhookUpdatedAt?: string;
@@ -499,7 +500,10 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
 
   @callable()
   async listNotificationChannels() {
-    return this.data.notificationChannels;
+    return this.data.notificationChannels.map((channel) => ({
+      ...channel,
+      botToken: channel.botToken ? "" : undefined
+    }));
   }
 
   @callable()
@@ -525,6 +529,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       url: safeString(input.url) || existing?.url,
       botToken: safeString(input.botToken) || existing?.botToken,
       chatId: safeString(input.chatId) || existing?.chatId,
+      telegramWebhookPath: existing?.telegramWebhookPath,
       telegramWebhookUrl: existing?.telegramWebhookUrl,
       telegramWebhookStatus: existing?.telegramWebhookStatus,
       telegramWebhookUpdatedAt: existing?.telegramWebhookUpdatedAt,
@@ -536,7 +541,9 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       const token = channel.botToken || this.env.TELEGRAM_BOT_TOKEN;
       const origin = safeString(input.webhookOrigin);
       if (token && origin) {
-        const webhookUrl = `${origin.replace(/\/+$/, "")}/telegram`;
+        const webhookPath = channel.telegramWebhookPath || `/telegram/${id}`;
+        const webhookUrl = `${origin.replace(/\/+$/, "")}${webhookPath}`;
+        channel.telegramWebhookPath = webhookPath;
         channel.telegramWebhookUrl = webhookUrl;
         channel.telegramWebhookStatus = await setTelegramWebhook(
           token,
@@ -586,7 +593,9 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       const token = channel.botToken || this.env.TELEGRAM_BOT_TOKEN;
       const origin = safeString(webhookOrigin);
       if (token && origin) {
-        const webhookUrl = `${origin.replace(/\/+$/, "")}/telegram`;
+        const webhookPath =
+          channel.telegramWebhookPath || `/telegram/${channel.id}`;
+        const webhookUrl = `${origin.replace(/\/+$/, "")}${webhookPath}`;
         const status = await setTelegramWebhook(token, webhookUrl);
         telegramWebhookUrl = webhookUrl;
         telegramWebhookStatus = status;
@@ -596,6 +605,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
             item.id === channelId
               ? {
                   ...item,
+                  telegramWebhookPath: webhookPath,
                   telegramWebhookUrl: webhookUrl,
                   telegramWebhookStatus: status,
                   telegramWebhookUpdatedAt: updatedAt
@@ -615,12 +625,17 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   }
 
   @callable()
-  async handleTelegramMessage(chatId: string | number, text: string) {
+  async handleTelegramMessage(
+    chatId: string | number,
+    text: string,
+    channelId?: string
+  ) {
     const normalizedChatId = String(chatId);
     const channel = this.data.notificationChannels.find(
       (item) =>
         item.type === "telegram" &&
         item.enabled &&
+        (!channelId || item.id === channelId) &&
         String(item.chatId || "") === normalizedChatId
     );
     const token = channel?.botToken || this.env.TELEGRAM_BOT_TOKEN;
@@ -765,6 +780,10 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   async pollAgent(input: { serverId?: string; token?: string }) {
     const server = this.authenticateAgent(input.serverId, input.token);
     const now = nowIso();
+    const reportedHost = safeString((input as { host?: string }).host);
+    const reportedHostname = safeString(
+      (input as { hostname?: string }).hostname
+    );
     const expiresAt = Date.now();
     const currentTasks = this.data.agentTasks.filter(
       (task) =>
@@ -784,8 +803,19 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
         item.id === server.id
           ? {
               ...item,
+              host: reportedHost || item.host,
+              agentUrl: reportedHost
+                ? buildAgentUrl(reportedHost)
+                : item.agentUrl,
               status: "online" as const,
               lastSeenAt: now,
+              lastSnapshot: reportedHostname
+                ? {
+                    ...(item.lastSnapshot || { collectedAt: now }),
+                    hostname: reportedHostname,
+                    collectedAt: item.lastSnapshot?.collectedAt || now
+                  }
+                : item.lastSnapshot,
               updatedAt: now
             }
           : item
@@ -1288,7 +1318,8 @@ function getController(env: Env) {
     ): Promise<unknown>;
     handleTelegramMessage(
       chatId: string | number,
-      text: string
+      text: string,
+      channelId?: string
     ): Promise<unknown>;
     createInstallToken(input?: unknown): Promise<InstallToken>;
     registerServer(input: unknown): Promise<unknown>;
@@ -1781,6 +1812,12 @@ def register():
         file.write(f"\nEDGEBUTLER_AGENT_TOKEN={AGENT_TOKEN}\n")
         file.write(f"EDGEBUTLER_SERVER_ID={SERVER_ID}\n")
 
+def safe_public_ip():
+    try:
+        return requests.get("https://api.ipify.org", timeout=10).text.strip()
+    except Exception:
+        return ""
+
 def poll_loop():
     while True:
         try:
@@ -1789,7 +1826,12 @@ def poll_loop():
                 continue
             response = requests.post(
                 f"{ENDPOINT}/api/agent/poll",
-                json={"serverId": SERVER_ID, "token": AGENT_TOKEN},
+                json={
+                    "serverId": SERVER_ID,
+                    "token": AGENT_TOKEN,
+                    "host": safe_public_ip(),
+                    "hostname": socket.gethostname(),
+                },
                 timeout=30,
             )
             response.raise_for_status()
@@ -1856,14 +1898,25 @@ export default {
         );
       }
 
-      if (url.pathname === "/telegram" && request.method === "POST") {
+      if (
+        (url.pathname === "/telegram" ||
+          url.pathname.match(/^\/telegram\/[^/]+$/)) &&
+        request.method === "POST"
+      ) {
+        const channelId = url.pathname.startsWith("/telegram/")
+          ? decodeURIComponent(url.pathname.split("/")[2])
+          : undefined;
         const update = (await request.json()) as {
           message?: { chat?: { id?: number | string }; text?: string };
         };
         const chatId = update.message?.chat?.id;
         const text = update.message?.text;
         if (chatId && text) {
-          await getController(env).handleTelegramMessage(chatId, text);
+          await getController(env).handleTelegramMessage(
+            chatId,
+            text,
+            channelId
+          );
         }
         return new Response("OK");
       }

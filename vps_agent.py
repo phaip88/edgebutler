@@ -120,6 +120,13 @@ def register():
             file.write(f"EDGEBUTLER_SERVER_ID={SERVER_ID}\n")
 
 
+def safe_public_ip():
+    try:
+        return public_ip()
+    except Exception:
+        return ""
+
+
 def poll_loop():
     while True:
         try:
@@ -128,7 +135,12 @@ def poll_loop():
                 continue
             response = requests.post(
                 f"{ENDPOINT}/api/agent/poll",
-                json={"serverId": SERVER_ID, "token": AGENT_TOKEN},
+                json={
+                    "serverId": SERVER_ID,
+                    "token": AGENT_TOKEN,
+                    "host": safe_public_ip(),
+                    "hostname": socket.gethostname(),
+                },
                 timeout=30,
             )
             response.raise_for_status()
