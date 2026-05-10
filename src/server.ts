@@ -6,6 +6,7 @@ type ChatMessage = {
 };
 
 type ServerStatus = "pending" | "online" | "offline" | "unknown";
+type Language = "zh" | "en";
 
 type ManagedServer = {
   id: string;
@@ -403,7 +404,7 @@ function isDeleteCommand(action: string, target = "", command = "") {
 function hasDestructiveIntent(command: string) {
   const text = command.trim().toLowerCase();
   return [
-    /^(删除|移除|清空|卸载|销毁|抹除)\b/,
+    /^(删除|移除|清空|卸载|销毁|抹除)(\s|$)/,
     /^(delete|remove|purge|uninstall|destroy|wipe)\b/,
     /\brm\s+(-[^\s]*\s+)*[^-\s]/,
     /\brmdir\b/,
@@ -414,6 +415,14 @@ function hasDestructiveIntent(command: string) {
     /\bdnf\s+remove\b/,
     /\bsystemctl\s+(disable|mask)\b/
   ].some((pattern) => pattern.test(text));
+}
+
+function detectLanguage(command = ""): Language {
+  return /[\u3400-\u9fff]/.test(command) ? "zh" : "en";
+}
+
+function normalizeLanguage(value: unknown, fallback: Language = "zh"): Language {
+  return value === "en" || value === "zh" ? value : fallback;
 }
 
 function extractJsonObjects(text: string) {
@@ -595,6 +604,8 @@ async function setTelegramWebhook(token: string, webhookUrl: string) {
 }
 
 export class EdgeButler extends Agent<Env, EdgeButlerState> {
+  private responseLanguage: Language = "zh";
+
   initialState: EdgeButlerState = {
     rules:
       "All commands can execute directly. Delete/remove commands require yes/no confirmation.",
@@ -627,6 +638,14 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
 
   private save(patch: Partial<EdgeButlerState>) {
     this.setState({ ...this.data, ...patch });
+  }
+
+  private isZh() {
+    return this.responseLanguage === "zh";
+  }
+
+  private msg(en: string, zh: string) {
+    return this.isZh() ? zh : en;
   }
 
   private appendLog(log: Omit<OperationLog, "id" | "createdAt">) {
@@ -1244,12 +1263,25 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   }
 
   @callable()
-  async run(command: string, source: "web" | "telegram" = "web") {
+  async run(
+    command: string,
+    source: "web" | "telegram" = "web",
+    language?: Language
+  ) {
+    this.responseLanguage = normalizeLanguage(language, detectLanguage(command));
     const trimmed = command.trim();
-    if (!trimmed) return "Please enter an operations command.";
+    if (!trimmed) {
+      return this.msg(
+        "Please enter an operations command.",
+        "请输入运维指令。"
+      );
+    }
 
     if (trimmed.toLowerCase() === "/all") {
-      return "[EdgeButler] Usage: /all <command>";
+      return this.msg(
+        "[EdgeButler] Usage: /all <command>",
+        "[EdgeButler] 用法：/all <命令>"
+      );
     }
 
     if (trimmed.toLowerCase().startsWith("/all ")) {
@@ -1267,14 +1299,20 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       const [, names = "", scopedCommand = ""] =
         trimmed.match(/^\/on\s+([^\s]+)\s+([\s\S]+)$/i) || [];
       if (!names || !scopedCommand) {
-        return "[EdgeButler] Usage: /on zo,zo2 <command>";
+        return this.msg(
+          "[EdgeButler] Usage: /on zo,zo2 <command>",
+          "[EdgeButler] 用法：/on zo,zo2 <命令>"
+        );
       }
       const servers = names
         .split(",")
         .map((name) => this.resolveServer(undefined, name.trim()))
         .filter((server): server is ManagedServer => Boolean(server));
       if (!servers.length) {
-        return `[EdgeButler] No matching VPS found for: ${names}`;
+        return this.msg(
+          `[EdgeButler] No matching VPS found for: ${names}`,
+          `[EdgeButler] 未找到匹配的 VPS：${names}`
+        );
       }
       return await this.runOnServers(
         servers,
@@ -1350,28 +1388,45 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       !plan.target &&
       !plan.command
     ) {
-      return `Please provide a target for ${plan.action}, such as a service name, port, process name, or shell command.`;
+      return this.msg(
+        `Please provide a target for ${plan.action}, such as a service name, port, process name, or shell command.`,
+        `请为 ${plan.action} 提供明确目标，例如服务名、端口、进程名或 shell 命令。`
+      );
     }
 
     if (this.isBroadServiceControl(plan.action, plan.target, plan.command)) {
       return (
         this.targetMissingMessage(trimmed) ||
-        "Please provide a concrete service name."
+        this.msg(
+          "Please provide a concrete service name.",
+          "请提供明确的服务名称。"
+        )
       );
     }
 
     if (isDeleteCommand(plan.action, plan.target, plan.command)) {
       const pending = this.createPendingOperation(server, plan, source);
-      return [
-        "This delete/remove operation requires yes/no confirmation before execution.",
-        `Confirmation ID: ${pending.id}`,
-        `Server: ${server.name}`,
-        `Action: ${plan.action}`,
-        plan.command
-          ? `Command: ${plan.command}`
-          : `Target: ${plan.target || ""}`,
-        "Confirm yes or no from the web console."
-      ].join("\n");
+      return this.isZh()
+        ? [
+            "该删除/移除类操作需要 yes/no 二次确认后才会执行。",
+            `确认 ID：${pending.id}`,
+            `VPS：${server.name}`,
+            `动作：${plan.action}`,
+            plan.command
+              ? `命令：${plan.command}`
+              : `目标：${plan.target || ""}`,
+            "请在网页控制台确认 yes 或 no。"
+          ].join("\n")
+        : [
+            "This delete/remove operation requires yes/no confirmation before execution.",
+            `Confirmation ID: ${pending.id}`,
+            `Server: ${server.name}`,
+            `Action: ${plan.action}`,
+            plan.command
+              ? `Command: ${plan.command}`
+              : `Target: ${plan.target || ""}`,
+            "Confirm yes or no from the web console."
+          ].join("\n");
     }
 
     return await this.executeOperation({
@@ -1478,16 +1533,27 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     scope: "all_vps" | "selected_vps"
   ) {
     const trimmed = command.trim();
-    if (!trimmed) return `[EdgeButler] Missing command for ${scope}.`;
+    if (!trimmed) {
+      return this.msg(
+        `[EdgeButler] Missing command for ${scope}.`,
+        `[EdgeButler] ${scope} 缺少要执行的命令。`
+      );
+    }
 
     const targetMessage = this.targetMissingMessage(trimmed);
     if (targetMessage) return targetMessage;
     if (hasDestructiveIntent(trimmed)) {
-      return [
-        "[EdgeButler] Command not executed",
-        `Reason: destructive operations are blocked in ${scope}.`,
-        "Run the command on one selected VPS instead, then confirm from the web console."
-      ].join("\n");
+      return this.isZh()
+        ? [
+            "[EdgeButler] 命令未执行",
+            `原因：${scope} 范围内禁止批量执行删除/移除类危险操作。`,
+            "请先切换到单台 VPS，再通过网页控制台二次确认后执行。"
+          ].join("\n")
+        : [
+            "[EdgeButler] Command not executed",
+            `Reason: destructive operations are blocked in ${scope}.`,
+            "Run the command on one selected VPS instead, then confirm from the web console."
+          ].join("\n");
     }
 
     let plan =
@@ -1509,17 +1575,26 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     }
 
     if (isDeleteCommand(plan.action, plan.target, plan.command)) {
-      return [
-        "[EdgeButler] Command not executed",
-        `Reason: destructive operations are blocked in ${scope}.`,
-        "Run the command on one selected VPS instead, then confirm from the web console."
-      ].join("\n");
+      return this.isZh()
+        ? [
+            "[EdgeButler] 命令未执行",
+            `原因：${scope} 范围内禁止批量执行删除/移除类危险操作。`,
+            "请先切换到单台 VPS，再通过网页控制台二次确认后执行。"
+          ].join("\n")
+        : [
+            "[EdgeButler] Command not executed",
+            `Reason: destructive operations are blocked in ${scope}.`,
+            "Run the command on one selected VPS instead, then confirm from the web console."
+          ].join("\n");
     }
 
     if (this.isBroadServiceControl(plan.action, plan.target, plan.command)) {
       return (
         this.targetMissingMessage(trimmed) ||
-        "Please provide a concrete service name."
+        this.msg(
+          "Please provide a concrete service name.",
+          "请提供明确的服务名称。"
+        )
       );
     }
 
@@ -1530,7 +1605,10 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
           )
         : servers;
     if (!targets.length) {
-      return `[EdgeButler] No online VPS available for ${scope}.`;
+      return this.msg(
+        `[EdgeButler] No online VPS available for ${scope}.`,
+        `[EdgeButler] ${scope} 当前没有可用的在线 VPS。`
+      );
     }
 
     const results = await Promise.allSettled(
@@ -1547,7 +1625,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     );
 
     return [
-      `[EdgeButler] ${scope} result`,
+      this.msg(`[EdgeButler] ${scope} result`, `[EdgeButler] ${scope} 执行结果`),
       ...results.map((result, index) =>
         result.status === "fulfilled"
           ? result.value
@@ -1648,7 +1726,10 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     }
 
     return [
-      `[Operation] ${input.server.name} / ${input.action}`,
+      this.msg(
+        `[Operation] ${input.server.name} / ${input.action}`,
+        `[操作] ${input.server.name} / ${input.action}`
+      ),
       "",
       summary
     ].join("\n");
@@ -1700,6 +1781,52 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
             (server) => server.id === this.data.activeServerId
           )?.name || this.data.activeServerId
         : "none";
+      if (this.isZh()) {
+        return [
+          "EdgeButler 常用命令：",
+          "/new <vps> - 清空上下文，并锁定后续命令到指定 VPS",
+          "/new - 清空上下文并清除当前 VPS",
+          "/<vps> - 切换当前 VPS，例如 /zo 或 /zo2",
+          "/all <命令> - 对所有在线 VPS 逐台执行",
+          "/on zo,zo2 <命令> - 对指定 VPS 逐台执行",
+          "/chat - 对话模式，只回答不执行命令",
+          "/new 或 /<vps> - 退出对话模式，回到默认可执行模式",
+          "/mode - 显示当前模式和当前 VPS",
+          "/h - 显示帮助",
+          "",
+          "示例：",
+          "显示当前运行的所有进程明细",
+          "分析所有进程的功能作用",
+          "查询 nginx 的资源占用",
+          "停止 PID 1234",
+          "部署 https://github.com/tsl0922/ttyd",
+          "",
+          `当前模式：${this.data.mode || "execute"}`,
+          `当前 VPS：${active}`
+        ].join("\n");
+      }
+      return [
+        "EdgeButler commands:",
+        "/new <vps> - clear context and lock following commands to that VPS",
+        "/new - clear context and active VPS",
+        "/<vps> - switch active VPS, for example /zo or /zo2",
+        "/all <command> - run on every online VPS one by one",
+        "/on zo,zo2 <command> - run on selected VPS",
+        "/chat - chat mode, AI only answers and does not execute",
+        "/new or /<vps> - leave chat mode and return to the default executable mode",
+        "/mode - show current mode and active VPS",
+        "/h - show this help",
+        "",
+        "Examples:",
+        "Show all running processes",
+        "Analyze what running processes do",
+        "Check nginx resource usage",
+        "Stop PID 1234",
+        "Deploy https://github.com/tsl0922/ttyd",
+        "",
+        `Current mode: ${this.data.mode || "execute"}`,
+        `Active VPS: ${active}`
+      ].join("\n");
       return [
         "EdgeButler commands:",
         "/new <vps> - clear context and lock following commands to that VPS",
@@ -1732,13 +1859,22 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
         mode: "execute"
       });
       return server
-        ? `[Context] New session. Active VPS: ${server.name}`
-        : "[Context] New session. Active VPS cleared.";
+        ? this.msg(
+            `[Context] New session. Active VPS: ${server.name}`,
+            `[上下文] 已开启新会话。当前 VPS：${server.name}`
+          )
+        : this.msg(
+            "[Context] New session. Active VPS cleared.",
+            "[上下文] 已开启新会话。当前 VPS 已清除。"
+          );
     }
 
     if (name === "chat" || (name === "mode" && arg === "chat")) {
       this.save({ mode: "chat" });
-      return "[Mode] chat mode enabled. No commands will be executed.";
+      return this.msg(
+        "[Mode] chat mode enabled. No commands will be executed.",
+        "[模式] 已进入对话模式。不会执行任何命令。"
+      );
     }
 
     if (name === "mode") {
@@ -1747,16 +1883,25 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
             (server) => server.id === this.data.activeServerId
           )?.name || this.data.activeServerId
         : "none";
-      return `[Mode] ${this.data.mode || "execute"}; active VPS: ${active}`;
+      return this.msg(
+        `[Mode] ${this.data.mode || "execute"}; active VPS: ${active}`,
+        `[模式] ${this.data.mode || "execute"}；当前 VPS：${active}`
+      );
     }
 
     const server = this.resolveServer(undefined, name);
     if (server) {
       this.save({ activeServerId: server.id, mode: "execute" });
-      return `[Context] Active VPS: ${server.name}`;
+      return this.msg(
+        `[Context] Active VPS: ${server.name}`,
+        `[上下文] 当前 VPS：${server.name}`
+      );
     }
 
-    return `Unknown slash command: /${name}. Use /h for help.`;
+    return this.msg(
+      `Unknown slash command: /${name}. Use /h for help.`,
+      `未知斜杠命令：/${name}。使用 /h 查看帮助。`
+    );
   }
 
   private async chatOnly(command: string) {
@@ -1764,8 +1909,9 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       messages: [
         {
           role: "system",
-          content:
-            "You are EdgeButler in chat mode. Answer operations questions concisely. Do not execute or propose that you executed commands."
+          content: this.isZh()
+            ? "你是 EdgeButler 的对话模式。用简洁中文回答运维问题。不要执行命令，也不要声称已经执行命令。"
+            : "You are EdgeButler in chat mode. Answer operations questions concisely. Do not execute or propose that you executed commands."
         },
         ...this.data.history.slice(-8),
         { role: "user", content: command }
@@ -1819,6 +1965,33 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       : wantsOnlineOnly
         ? online
         : servers;
+    if (this.isZh()) {
+      const heading = wantsOfflineOnly
+        ? `当前离线 VPS：${offline.length} 台`
+        : wantsOnlineOnly
+          ? `当前在线 VPS：${online.length} 台`
+          : `已注册 VPS：${servers.length} 台；在线 ${online.length} 台；离线 ${offline.length} 台；待连接 ${pending.length} 台`;
+      const detail = targetServers.length
+        ? targetServers
+            .map((server) => {
+              const lastSeen = server.lastSeenAt
+                ? new Date(server.lastSeenAt).toISOString()
+                : "从未上报";
+              return `- ${server.name}：${server.status}；IP ${server.host || "unknown"}；位置 ${server.location || "unknown"}；最后心跳 ${lastSeen}`;
+            })
+            .join("\n")
+        : "- 无";
+
+      return [
+        "[EdgeButler] VPS 状态",
+        heading,
+        detail,
+        "",
+        /[\u8fde\u94fe]/.test(command)
+          ? "说明：在线表示近期收到 agent 心跳。本次没有执行 VPS shell 命令。"
+          : "说明：结果来自 EdgeButler 注册表和 agent 心跳。本次没有执行 VPS shell 命令。"
+      ].join("\n");
+    }
     const heading = wantsOfflineOnly
       ? `Current offline VPS: ${offline.length}`
       : wantsOnlineOnly
@@ -1879,6 +2052,32 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       trimmed
     );
     if (!serviceControl && !processControl) return undefined;
+    if (this.isZh()) {
+      return [
+        "[EdgeButler] 命令未执行",
+        "",
+        "原因：该命令缺少明确的执行目标。",
+        "请提供服务名、进程名、PID、文件路径或项目地址。",
+        "",
+        "示例：",
+        "停止 nginx",
+        "重启 ssh",
+        "停止 PID 1234",
+        "查询 ttyd 的进程"
+      ].join("\n");
+    }
+    return [
+      "[EdgeButler] Command not executed",
+      "",
+      "Reason: the command is missing a concrete target.",
+      "Please provide a service name, process name, PID, file path, or project URL.",
+      "",
+      "Examples:",
+      "Stop nginx",
+      "Restart ssh",
+      "Stop PID 1234",
+      "Check ttyd processes"
+    ].join("\n");
     return [
       "[EdgeButler] Command not executed",
       "",
@@ -1905,6 +2104,24 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   }
 
   private scopeMissingMessage(action: string, target = "", command = "") {
+    if (this.isZh()) {
+      return [
+        "[EdgeButler] 命令未执行",
+        "",
+        "原因：当前没有选择 VPS，所以平台范围内禁止执行 VPS 运维操作。",
+        "当前范围：平台",
+        `识别到的动作：${action || "unknown"}`,
+        target ? `目标：${target}` : "",
+        command ? `命令：${command}` : "",
+        "",
+        "请先选择执行范围：",
+        "/zo",
+        "/new zo",
+        "或使用 /all <命令> 对所有在线 VPS 逐台执行。"
+      ]
+        .filter(Boolean)
+        .join("\n");
+    }
     return [
       "[EdgeButler] Command not executed",
       "",
@@ -2485,7 +2702,9 @@ All commands can execute directly. Deletion/removal/destructive erase commands w
             repairedCommand ? `Auto-repaired command: ${repairedCommand}` : "",
             "Raw server output:",
             rawOutput,
-            "Please summarize the result in concise Chinese. Mention the executed command when useful. Mention errors or empty output directly."
+            this.isZh()
+              ? "请用简洁中文总结结果。必要时说明实际执行的命令。错误或空输出要直接说明。"
+              : "Please summarize the result in concise English. Mention the executed command when useful. Mention errors or empty output directly."
           ]
             .filter(Boolean)
             .join("\n")
@@ -2628,7 +2847,11 @@ function getController(env: Env) {
     createAgentEndpointUpdate(input: unknown): Promise<unknown>;
     confirmOperation(operationId: string): Promise<string>;
     cancelOperation(operationId: string): Promise<unknown>;
-    run(command: string, source?: "web" | "telegram"): Promise<string>;
+    run(
+      command: string,
+      source?: "web" | "telegram",
+      language?: Language
+    ): Promise<string>;
   };
 }
 
@@ -2815,7 +3038,11 @@ async function handleApi(request: Request, env: Env) {
   if (url.pathname === "/api/ai/run" && request.method === "POST") {
     const body = await readJson(request);
     return json({
-      text: await controller.run(safeString(body.command), "web")
+      text: await controller.run(
+        safeString(body.command),
+        "web",
+        normalizeLanguage(body.language, detectLanguage(safeString(body.command)))
+      )
     });
   }
 
