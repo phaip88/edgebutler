@@ -38,7 +38,6 @@ ACTIONS = {
     "process_inspect": "printf 'Matched processes:\\n'; ps aux | grep '{target}' | grep -v grep; printf '\\nResource details:\\n'; pid=$(pgrep -f '{target}' | head -n 1); if [ -n \"$pid\" ]; then ps -p \"$pid\" -o pid,ppid,user,stat,pcpu,pmem,etime,comm,args; cat /proc/$pid/status 2>/dev/null | head -n 40; fi",
     "create_directory": "mkdir -p -- '{target}' && echo 'Directory created: {target}'",
     "restart_service": "systemctl restart '{target}'",
-    "stop_process": "if echo '{target}' | grep -Eq '^[0-9]+$'; then kill -TERM '{target}'; else pkill -TERM -f '{target}'; fi; echo 'Stop signal sent: {target}'",
     "service_health": (
         "systemctl status '{target}' --no-pager; "
         "journalctl -u '{target}' -n 60 --no-pager"
@@ -71,6 +70,57 @@ def run_command(command, timeout=30):
 
 def shell_quote(value):
     return "'" + str(value).replace("'", "'\\''") + "'"
+
+
+def stop_process(target):
+    target = str(target or "").strip()
+    if not target:
+        return {"stdout": "", "stderr": "target is required", "code": 2}
+    current_pid = os.getpid()
+    candidates = []
+    if target.isdigit():
+        candidates = [int(target)]
+    else:
+        ps = subprocess.run(
+            ["ps", "-eo", "pid=,args="],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        for line in ps.stdout.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) != 2:
+                continue
+            pid = int(parts[0])
+            args = parts[1]
+            if pid == current_pid or "edgebutler/agent.py" in args:
+                continue
+            if target.lower() in args.lower():
+                candidates.append(pid)
+
+    if not candidates:
+        return {"stdout": "", "stderr": f"no process matched: {target}", "code": 1}
+
+    stopped = []
+    errors = []
+    for pid in sorted(set(candidates)):
+        if pid in (0, 1, current_pid):
+            continue
+        try:
+            os.kill(pid, 15)
+            stopped.append(pid)
+        except ProcessLookupError:
+            continue
+        except PermissionError as exc:
+            errors.append(f"{pid}: {exc}")
+
+    if not stopped and errors:
+        return {"stdout": "", "stderr": "\n".join(errors), "code": 1}
+    return {
+        "stdout": f"Stop signal sent to PID(s): {', '.join(map(str, stopped))}\nTarget: {target}",
+        "stderr": "\n".join(errors),
+        "code": 0 if stopped else 1,
+    }
 
 
 def deploy_ttyd():
@@ -198,6 +248,9 @@ def execute_action(action, target="", command=""):
 
     if action == "deploy_project":
         return deploy_project(target or command)
+
+    if action == "stop_process":
+        return stop_process(target)
 
     if action not in ACTIONS:
         return {"stdout": "", "stderr": f"unsupported action: {action}", "code": 2}
