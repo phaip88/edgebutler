@@ -129,7 +129,13 @@ WantedBy=multi-user.target
             timeout=120,
         )
     return run_command(
-        "pkill -f '/usr/local/bin/ttyd .* -p 7681' || true; nohup /usr/local/bin/ttyd -W -p 7681 /bin/bash >/var/log/ttyd.log 2>&1 & echo $! >/var/run/ttyd.pid; echo 'ttyd started on port 7681'",
+        "pkill -x ttyd >/dev/null 2>&1 || true; "
+        "nohup /usr/local/bin/ttyd -W -p 7681 /bin/bash >/var/log/ttyd.log 2>&1 & "
+        "echo $! >/var/run/ttyd.pid; "
+        "sleep 2; "
+        "ss -lntp 2>/dev/null | grep 7681 || true; "
+        "pgrep -af -- 'ttyd|/usr/local/bin/ttyd' || true; "
+        "echo 'ttyd started on port 7681'",
         timeout=30,
     )
 
