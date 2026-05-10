@@ -135,6 +135,7 @@ type Env = {
 };
 
 const ACTIONS_REQUIRING_TARGET = new Set([
+  "create_directory",
   "check_port",
   "check_process",
   "restart_service",
@@ -144,6 +145,8 @@ const ACTIONS_REQUIRING_TARGET = new Set([
 
 const COMMAND_ACTIONS = new Set(["restart_service", "shell"]);
 const ACTION_ALIASES: Record<string, string> = {
+  create_folder: "create_directory",
+  mkdir: "create_directory",
   check_system_status: "server_summary",
   system_status: "server_summary",
   status: "server_summary",
@@ -376,6 +379,24 @@ function parseActionPlanText(text: string): ActionPlan | undefined {
     })
     .filter((item): item is ActionPlan => Boolean(item?.type));
   return parsed.find((item) => item.type === "action") || parsed[0];
+}
+
+function actionToAgentCommand(input: {
+  action: string;
+  target?: string;
+  command?: string;
+}): { action: string; target?: string; command?: string } {
+  if (input.action !== "create_directory") return input;
+
+  const rawPath = safeString(input.target || input.command);
+  const path =
+    rawPath.startsWith("/") || rawPath.startsWith("~")
+      ? rawPath
+      : `~/${rawPath}`;
+  return {
+    action: "shell",
+    command: `mkdir -p -- ${shellQuote(path)} && echo "Directory created: ${path}"`
+  };
 }
 
 function sleep(ms: number) {
@@ -1112,7 +1133,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       return `[System] Rules updated: ${rules}`;
     }
 
-    const plan = await this.plan(trimmed);
+    const plan = this.planSimpleCommand(trimmed) || (await this.plan(trimmed));
     if (plan.type === "chat") return `[EdgeButler] ${plan.text}`;
     plan.action = this.normalizeAction(plan.action);
 
@@ -1281,11 +1302,12 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     command?: string;
     source: "web" | "telegram";
   }) {
+    const agentInput = actionToAgentCommand(input);
     const result = await this.callAgent(
       input.server,
-      input.action,
-      input.target,
-      input.command
+      agentInput.action,
+      agentInput.target,
+      agentInput.command
     );
     const rawOutput = truncate(
       result.stdout || result.stderr || "Command completed without output."
@@ -1296,7 +1318,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       source: input.source,
       action: input.action,
       target: input.target,
-      command: input.command,
+      command: input.command || agentInput.command,
       serverId: input.server.id,
       output: rawOutput
     });
@@ -1329,6 +1351,45 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     return servers.length === 1 ? servers[0] : undefined;
   }
 
+  private planSimpleCommand(command: string): ActionPlan | undefined {
+    const lower = command.toLowerCase();
+    const server = [...this.data.servers]
+      .sort((left, right) => right.name.length - left.name.length)
+      .find(
+        (item) =>
+          lower.includes(item.name.toLowerCase()) ||
+          lower.includes(item.id.toLowerCase())
+      );
+
+    const createDirectory =
+      /(创建|新建|建立|create|make|mkdir)/i.test(command) &&
+      /(文件夹|目录|directory|folder)/i.test(command);
+    if (!createDirectory) return undefined;
+
+    const pathMatch =
+      command.match(
+        /(?:创建|新建|建立)\s*(?:一个|1个)?\s*([A-Za-z0-9._-]+)\s*(?:的)?(?:文件夹|目录)/
+      ) ||
+      command.match(
+        /(?:create|make|mkdir)\s+(?:directory|folder)?\s*([~/A-Za-z0-9._-]+)/i
+      );
+    const name = safeString(pathMatch?.[1]);
+    if (!name) return undefined;
+
+    const inHome = /(用户目录|家目录|home|user directory)/i.test(command);
+    return {
+      type: "action",
+      serverId: server?.id,
+      serverName: server?.name,
+      action: "create_directory",
+      target:
+        inHome && !name.startsWith("/") && !name.startsWith("~")
+          ? `~/${name}`
+          : name,
+      needsConfirmation: false
+    };
+  }
+
   private async plan(command: string): Promise<ActionPlan> {
     const serverList = this.data.servers
       .map(
@@ -1355,6 +1416,7 @@ Actions:
 - check_docker
 - check_logs
 - check_top_processes
+- create_directory, requires target path. If the user says home/user directory, use ~/name.
 - check_port, requires target port
 - check_process, requires target process
 - restart_service, requires target service
@@ -1978,6 +2040,7 @@ ACTIONS = {
     "check_top_processes": "ps aux --sort=-%cpu | head -n 15",
     "check_port": "ss -lntp | grep '{target}'",
     "check_process": "ps aux | grep '{target}' | grep -v grep",
+    "create_directory": "mkdir -p -- '{target}' && echo 'Directory created: {target}'",
     "restart_service": "systemctl restart '{target}'",
     "service_health": "systemctl status '{target}' --no-pager; journalctl -u '{target}' -n 60 --no-pager",
     "server_summary": "printf 'hostname: '; hostname; printf 'os: '; . /etc/os-release && echo $PRETTY_NAME; printf 'uptime: '; uptime -p; printf 'load: '; cat /proc/loadavg; printf 'memory: '; free -m | awk 'NR==2{print $3\"/\"$2\" MB\"}'; printf 'disk: '; df -h / | awk 'NR==2{print $3\"/\"$2\" used, \"$5}'"
@@ -1987,6 +2050,9 @@ def run_command(cmd):
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
     return {"stdout": result.stdout, "stderr": result.stderr, "code": result.returncode}
 
+def shell_quote(value):
+    return "'" + str(value).replace("'", "'\\''") + "'"
+
 def execute_action(action, target="", command=""):
     target = str(target or "")
     command = str(command or "")
@@ -1994,6 +2060,13 @@ def execute_action(action, target="", command=""):
         if not command:
             return {"stdout": "", "stderr": "command is required", "code": 2}
         return run_command(command)
+    if action == "create_directory":
+        if not target:
+            return {"stdout": "", "stderr": "target is required", "code": 2}
+        path = target
+        if not path.startswith(("/", "~")):
+            path = os.path.join(os.path.expanduser("~"), path)
+        return run_command(f"mkdir -p -- {shell_quote(path)} && echo {shell_quote('Directory created: ' + path)}")
     if action not in ACTIONS:
         return {"stdout": "", "stderr": f"unsupported action: {action}", "code": 2}
     template = ACTIONS[action]

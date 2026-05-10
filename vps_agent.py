@@ -30,6 +30,7 @@ ACTIONS = {
     "check_top_processes": "ps aux --sort=-%cpu | head -n 15",
     "check_port": "ss -lntp | grep '{target}'",
     "check_process": "ps aux | grep '{target}' | grep -v grep",
+    "create_directory": "mkdir -p -- '{target}' && echo 'Directory created: {target}'",
     "restart_service": "systemctl restart '{target}'",
     "service_health": (
         "systemctl status '{target}' --no-pager; "
@@ -61,6 +62,10 @@ def run_command(command):
     }
 
 
+def shell_quote(value):
+    return "'" + str(value).replace("'", "'\\''") + "'"
+
+
 def execute_action(action, target="", command=""):
     target = str(target or "")
     command = str(command or "")
@@ -68,6 +73,16 @@ def execute_action(action, target="", command=""):
         if not command:
             return {"stdout": "", "stderr": "command is required", "code": 2}
         return run_command(command)
+
+    if action == "create_directory":
+        if not target:
+            return {"stdout": "", "stderr": "target is required", "code": 2}
+        path = target
+        if not path.startswith(("/", "~")):
+            path = os.path.join(os.path.expanduser("~"), path)
+        return run_command(
+            f"mkdir -p -- {shell_quote(path)} && echo {shell_quote('Directory created: ' + path)}"
+        )
 
     if action not in ACTIONS:
         return {"stdout": "", "stderr": f"unsupported action: {action}", "code": 2}
