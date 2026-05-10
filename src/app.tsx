@@ -157,6 +157,9 @@ const text = {
     saveRules: "Save rules",
     rulesSaved: "AI system rules saved.",
     runAi: "Run AI command",
+    aiPlaceholder: "TRANSMIT_COMMAND: e.g. Check all Hong Kong nodes for status 200",
+    execute: "EXECUTE",
+    transmitting: "TRANSMITTING...",
     pendingTitle: "Pending Confirmations",
     pendingHelp: "Delete/remove confirmations expire after 10 minutes.",
     confirm: "Yes, execute",
@@ -229,6 +232,9 @@ const text = {
     saveRules: "保存规则",
     rulesSaved: "AI 系统规则已保存。",
     runAi: "执行 AI 指令",
+    aiPlaceholder: "输入运维指令：例如 查询所有香港节点是否正常",
+    execute: "执行",
+    transmitting: "发送中...",
     pendingTitle: "待确认操作",
     pendingHelp: "变更操作 10 分钟后过期。",
     confirm: "确认执行",
@@ -557,7 +563,7 @@ export default function App() {
     void withLoading(async () => {
       const result = await api<{ text: string }>("/api/ai/run", {
         method: "POST",
-        body: JSON.stringify({ command })
+        body: JSON.stringify({ command, language })
       });
       setAiOutput(result.text);
       await reload();
@@ -1771,7 +1777,7 @@ export default function App() {
               value={aiCommand}
               onChange={(event) => setAiCommand(event.target.value)}
               className="flex-1 bg-transparent border-none py-3 px-2 text-sm text-white placeholder:text-slate-600 outline-none resize-none h-12 leading-relaxed custom-scrollbar no-scrollbar"
-              placeholder="TRANSMIT_COMMAND: e.g. Check all Hong Kong nodes for status 200"
+              placeholder={t.aiPlaceholder}
               rows={1}
             />
             <button
@@ -1779,7 +1785,7 @@ export default function App() {
               onClick={runAiCommand}
               className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black px-8 py-3 rounded-2xl shadow-lg shadow-cyan-500/20 transition-all transform active:scale-95 disabled:opacity-30 disabled:grayscale uppercase tracking-[0.2em] text-[10px] shrink-0"
             >
-              {loading ? "TRANSMITTING..." : "EXECUTE"}
+              {loading ? t.transmitting : t.execute}
             </button>
           </div>
         </div>
