@@ -1203,6 +1203,9 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       return `[System] Rules updated: ${rules}`;
     }
 
+    const platformAnswer = this.answerPlatformInventoryQuestion(trimmed);
+    if (platformAnswer) return platformAnswer;
+
     if (this.data.mode === "chat") {
       return await this.chatOnly(trimmed);
     }
@@ -1587,6 +1590,59 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       ].slice(-20)
     });
     return `[Chat] ${text}`;
+  }
+
+  private answerPlatformInventoryQuestion(command: string) {
+    const lower = command.toLowerCase();
+    const mentionsFleet =
+      /(vps|server|servers|agent|agents|client|clients)/i.test(command) ||
+      /服务器|主机|客户端|节点/.test(command);
+    if (!mentionsFleet) return undefined;
+
+    const asksInventory =
+      /几台|多少|几个|有哪些|名称|名字|清单|列表|在线|离线|正常|连接|链接|失联|失链|registered|connected|online|offline|list|count/i.test(
+        command
+      );
+    if (!asksInventory) return undefined;
+
+    const servers = this.data.servers.map(withDerivedServerStatus);
+    const online = servers.filter((server) => server.status === "online");
+    const offline = servers.filter((server) => server.status === "offline");
+    const pending = servers.filter((server) => server.status === "pending");
+    const wantsOnlineOnly =
+      /在线|正常|连接正常|链接正常|connected|online/i.test(command) &&
+      !/离线|失联|失链|offline/i.test(command);
+    const wantsOfflineOnly = /离线|失联|失链|offline/i.test(command);
+    const targetServers = wantsOfflineOnly
+      ? offline
+      : wantsOnlineOnly
+        ? online
+        : servers;
+    const heading = wantsOfflineOnly
+      ? `当前离线 VPS：${offline.length} 台`
+      : wantsOnlineOnly
+        ? `当前连接正常 VPS：${online.length} 台`
+        : `当前已注册 VPS：${servers.length} 台；在线 ${online.length} 台，离线 ${offline.length} 台，待注册 ${pending.length} 台`;
+    const detail = targetServers.length
+      ? targetServers
+          .map((server) => {
+            const lastSeen = server.lastSeenAt
+              ? new Date(server.lastSeenAt).toISOString()
+              : "never";
+            return `- ${server.name}：${server.status}，IP ${server.host || "unknown"}，位置 ${server.location || "unknown"}，最后心跳 ${lastSeen}`;
+          })
+          .join("\n")
+      : "- 无";
+
+    return [
+      "[EdgeButler] VPS 状态",
+      heading,
+      detail,
+      "",
+      lower.includes("链接") || lower.includes("连接")
+        ? "说明：这里的“连接正常”按 agent 最近心跳判断，不会执行任何 VPS shell 命令。"
+        : "说明：该结果来自 EdgeButler 内部注册表和 agent 心跳，不会执行任何 VPS shell 命令。"
+    ].join("\n");
   }
 
   private planBuiltInCommand(command: string): ActionPlan | undefined {
