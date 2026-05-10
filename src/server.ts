@@ -400,6 +400,22 @@ function isDeleteCommand(action: string, target = "", command = "") {
   ].some((pattern) => pattern.test(text));
 }
 
+function hasDestructiveIntent(command: string) {
+  const text = command.trim().toLowerCase();
+  return [
+    /^(删除|移除|清空|卸载|销毁|抹除)\b/,
+    /^(delete|remove|purge|uninstall|destroy|wipe)\b/,
+    /\brm\s+(-[^\s]*\s+)*[^-\s]/,
+    /\brmdir\b/,
+    /\btruncate\s+-s\s*0\b/,
+    /\bfind\b[\s\S]*\s-delete\b/,
+    /\bapt(-get)?\s+(purge|remove)\b/,
+    /\byum\s+remove\b/,
+    /\bdnf\s+remove\b/,
+    /\bsystemctl\s+(disable|mask)\b/
+  ].some((pattern) => pattern.test(text));
+}
+
 function extractJsonObjects(text: string) {
   const objects: string[] = [];
   let start = -1;
@@ -501,11 +517,41 @@ function inferServerName(input: {
 }
 
 async function readJson(request: Request) {
+  const text = await request.text();
+  if (!text.trim()) return {};
   try {
-    return (await request.json()) as Record<string, unknown>;
+    return JSON.parse(text) as Record<string, unknown>;
   } catch {
-    return {};
+    throw new ApiError("Invalid JSON request body.", 400);
   }
+}
+
+class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+function apiErrorStatus(error: unknown) {
+  if (error instanceof ApiError) return error.status;
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error);
+  if (message.includes("invalid agent credentials")) return 401;
+  if (
+    message.includes("not found") ||
+    message.includes("unknown server") ||
+    message.includes("pending operation not found") ||
+    message.includes("notification channel not found")
+  ) {
+    return 404;
+  }
+  if (message.includes("expired")) return 410;
+  if (message.includes("invalid") || message.includes("missing")) return 400;
+  return 500;
 }
 
 async function sendTelegram(
@@ -1202,6 +1248,10 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     const trimmed = command.trim();
     if (!trimmed) return "Please enter an operations command.";
 
+    if (trimmed.toLowerCase() === "/all") {
+      return "[EdgeButler] Usage: /all <command>";
+    }
+
     if (trimmed.toLowerCase().startsWith("/all ")) {
       return await this.runOnServers(
         this.data.servers.filter(
@@ -1432,6 +1482,13 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
 
     const targetMessage = this.targetMissingMessage(trimmed);
     if (targetMessage) return targetMessage;
+    if (hasDestructiveIntent(trimmed)) {
+      return [
+        "[EdgeButler] Command not executed",
+        `Reason: destructive operations are blocked in ${scope}.`,
+        "Run the command on one selected VPS instead, then confirm from the web console."
+      ].join("\n");
+    }
 
     let plan =
       this.planBuiltInCommand(trimmed) ||
@@ -3362,7 +3419,7 @@ export default {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return json({ error: message }, { status: 500 });
+      return json({ error: message }, { status: apiErrorStatus(error) });
     }
   }
 };
