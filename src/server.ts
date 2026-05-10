@@ -104,6 +104,8 @@ type NotificationChannel = {
 
 type EdgeButlerState = {
   rules: string;
+  activeServerId?: string;
+  mode?: "execute" | "chat";
   history: ChatMessage[];
   servers: ManagedServer[];
   installTokens: InstallToken[];
@@ -136,8 +138,12 @@ type Env = {
 
 const ACTIONS_REQUIRING_TARGET = new Set([
   "create_directory",
+  "deploy_project",
+  "deploy_ttyd",
   "check_port",
   "check_process",
+  "process_inspect",
+  "stop_process",
   "restart_service",
   "service_health",
   "shell"
@@ -147,6 +153,16 @@ const COMMAND_ACTIONS = new Set(["restart_service", "shell"]);
 const ACTION_ALIASES: Record<string, string> = {
   create_folder: "create_directory",
   mkdir: "create_directory",
+  list_processes: "process_list",
+  process_details: "process_inspect",
+  inspect_process: "process_inspect",
+  analyze_process: "analyze_processes",
+  analyze_process_list: "analyze_processes",
+  kill_process: "stop_process",
+  deploy_ttyd_server: "deploy_ttyd",
+  deploy_github_project: "deploy_project",
+  deploy_repo: "deploy_project",
+  install_project: "deploy_project",
   check_system_status: "server_summary",
   system_status: "server_summary",
   status: "server_summary",
@@ -479,6 +495,8 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   initialState: EdgeButlerState = {
     rules:
       "All commands can execute directly. Delete/remove commands require yes/no confirmation.",
+    activeServerId: undefined,
+    mode: "execute",
     history: [],
     servers: [],
     installTokens: [],
@@ -498,6 +516,8 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       pendingOperations: this.state?.pendingOperations || [],
       agentTasks: this.state?.agentTasks || [],
       notificationChannels: this.state?.notificationChannels || [],
+      activeServerId: this.state?.activeServerId,
+      mode: this.state?.mode || "execute",
       history: this.state?.history || []
     };
   }
@@ -1127,17 +1147,30 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     const trimmed = command.trim();
     if (!trimmed) return "Please enter an operations command.";
 
+    const slash = this.handleSlashCommand(trimmed);
+    if (slash) return slash;
+
     if (trimmed.startsWith("rules:")) {
       const rules = trimmed.replace("rules:", "").trim();
       this.save({ rules });
       return `[System] Rules updated: ${rules}`;
     }
 
-    const plan = this.planSimpleCommand(trimmed) || (await this.plan(trimmed));
+    if (this.data.mode === "chat") {
+      return await this.chatOnly(trimmed);
+    }
+
+    const plan =
+      this.planBuiltInCommand(trimmed) ||
+      this.planSimpleCommand(trimmed) ||
+      (await this.plan(trimmed));
     if (plan.type === "chat") return `[EdgeButler] ${plan.text}`;
     plan.action = this.normalizeAction(plan.action);
 
-    const server = this.resolveServer(plan.serverId, plan.serverName);
+    const server = this.resolveServer(
+      plan.serverId || this.data.activeServerId,
+      plan.serverName
+    );
     if (!server) {
       return "Please specify the VPS to operate on. Use a server name, ID, or add a server from the web console first.";
     }
@@ -1341,6 +1374,13 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     if (serverId) return servers.find((server) => server.id === serverId);
     if (serverName) {
       const query = serverName.toLowerCase();
+      const exact = servers.find(
+        (server) =>
+          server.name.toLowerCase() === query ||
+          server.customName?.toLowerCase() === query ||
+          server.id.toLowerCase() === query
+      );
+      if (exact) return exact;
       return servers.find(
         (server) =>
           server.name.toLowerCase().includes(query) ||
@@ -1349,6 +1389,294 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       );
     }
     return servers.length === 1 ? servers[0] : undefined;
+  }
+
+  private handleSlashCommand(command: string) {
+    if (!command.startsWith("/")) return undefined;
+    const [rawName, ...rest] = command.slice(1).trim().split(/\s+/);
+    const name = rawName.toLowerCase();
+    const arg = rest.join(" ").trim();
+
+    if (name === "h" || name === "help") {
+      const active = this.data.activeServerId
+        ? this.data.servers.find(
+            (server) => server.id === this.data.activeServerId
+          )?.name || this.data.activeServerId
+        : "none";
+      return [
+        "EdgeButler commands:",
+        "/new <vps> - clear context and lock following commands to that VPS",
+        "/new - clear context and active VPS",
+        "/<vps> - switch active VPS, for example /zo or /zo2",
+        "/exec - execution mode, AI can run operations",
+        "/chat - chat mode, AI only answers and does not execute",
+        "/mode - show current mode and active VPS",
+        "/h - show this help",
+        "",
+        "Examples:",
+        "显示当前运行的所有进程明细",
+        "分析所有进程的功能作用",
+        "查询 nginx 的资源占用",
+        "停止 PID 1234",
+        "部署 https://github.com/tsl0922/ttyd",
+        "",
+        `Current mode: ${this.data.mode || "execute"}`,
+        `Active VPS: ${active}`
+      ].join("\n");
+    }
+
+    if (name === "new") {
+      const server = arg ? this.resolveServer(undefined, arg) : undefined;
+      this.save({
+        history: [],
+        activeServerId: server?.id,
+        mode: this.data.mode || "execute"
+      });
+      return server
+        ? `[Context] New session. Active VPS: ${server.name}`
+        : "[Context] New session. Active VPS cleared.";
+    }
+
+    if (name === "exec" || (name === "mode" && arg === "exec")) {
+      this.save({ mode: "execute" });
+      return "[Mode] execution mode enabled.";
+    }
+
+    if (name === "chat" || (name === "mode" && arg === "chat")) {
+      this.save({ mode: "chat" });
+      return "[Mode] chat mode enabled. No commands will be executed.";
+    }
+
+    if (name === "mode") {
+      const active = this.data.activeServerId
+        ? this.data.servers.find(
+            (server) => server.id === this.data.activeServerId
+          )?.name || this.data.activeServerId
+        : "none";
+      return `[Mode] ${this.data.mode || "execute"}; active VPS: ${active}`;
+    }
+
+    const server = this.resolveServer(undefined, name);
+    if (server) {
+      this.save({ activeServerId: server.id });
+      return `[Context] Active VPS: ${server.name}`;
+    }
+
+    return `Unknown slash command: /${name}. Use /h for help.`;
+  }
+
+  private async chatOnly(command: string) {
+    const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are EdgeButler in chat mode. Answer operations questions concisely. Do not execute or propose that you executed commands."
+        },
+        ...this.data.history.slice(-8),
+        { role: "user", content: command }
+      ]
+    });
+    const text = String(response.response || "");
+    this.save({
+      history: [
+        ...this.data.history,
+        { role: "user" as const, content: command },
+        { role: "assistant" as const, content: text }
+      ].slice(-20)
+    });
+    return `[Chat] ${text}`;
+  }
+
+  private planBuiltInCommand(command: string): ActionPlan | undefined {
+    const lower = command.toLowerCase();
+    const server = [...this.data.servers]
+      .sort((left, right) => right.name.length - left.name.length)
+      .find(
+        (item) =>
+          lower.includes(item.name.toLowerCase()) ||
+          lower.includes(item.id.toLowerCase())
+      );
+
+    const processPattern = new RegExp("\\u8fdb\\u7a0b|process|pid", "i");
+    const stopPattern = new RegExp(
+      "\\u505c\\u6b62|\\u7ed3\\u675f|kill|stop",
+      "i"
+    );
+    const inspectPattern = new RegExp(
+      "\\u8d44\\u6e90|\\u5360\\u7528|\\u8be6\\u60c5|inspect|detail",
+      "i"
+    );
+    const analyzePattern = new RegExp(
+      "\\u5206\\u6790|\\u4f5c\\u7528|\\u7528\\u9014|analy[sz]e",
+      "i"
+    );
+    const listPattern = new RegExp(
+      "\\u660e\\u7ec6|\\u5217\\u8868|\\u6240\\u6709|\\u5168\\u90e8|list|all",
+      "i"
+    );
+
+    if (stopPattern.test(command) && processPattern.test(command)) {
+      const target =
+        command.match(/\bpid\s*[:：]?\s*(\d+)/i)?.[1] ||
+        command.match(/\b(\d{2,})\b/)?.[1] ||
+        command.match(/(?:\u8fdb\u7a0b|process)\s*([A-Za-z0-9._-]+)/i)?.[1];
+      if (!target) return undefined;
+      return {
+        type: "action",
+        serverId: server?.id,
+        serverName: server?.name,
+        action: "stop_process",
+        target,
+        needsConfirmation: false
+      };
+    }
+
+    if (inspectPattern.test(command) && processPattern.test(command)) {
+      const target =
+        command.match(/\bpid\s*[:：]?\s*(\d+)/i)?.[1] ||
+        command.match(/\b(\d{2,})\b/)?.[1] ||
+        command.match(/(?:\u8fdb\u7a0b|process)\s*([A-Za-z0-9._-]+)/i)?.[1];
+      if (target) {
+        return {
+          type: "action",
+          serverId: server?.id,
+          serverName: server?.name,
+          action: "process_inspect",
+          target,
+          needsConfirmation: false
+        };
+      }
+    }
+
+    if (processPattern.test(command)) {
+      if (analyzePattern.test(command)) {
+        return {
+          type: "action",
+          serverId: server?.id,
+          serverName: server?.name,
+          action: "analyze_processes",
+          needsConfirmation: false
+        };
+      }
+      if (listPattern.test(command)) {
+        return {
+          type: "action",
+          serverId: server?.id,
+          serverName: server?.name,
+          action: "process_list",
+          needsConfirmation: false
+        };
+      }
+    }
+
+    const githubUrl = command.match(/https:\/\/github\.com\/[^\s，。)]+/i)?.[0];
+    if (githubUrl && /(部署|安装|搭建|deploy|install|setup)/i.test(command)) {
+      return {
+        type: "action",
+        serverId: server?.id,
+        serverName: server?.name,
+        action: githubUrl.toLowerCase().includes("tsl0922/ttyd")
+          ? "deploy_ttyd"
+          : "deploy_project",
+        target: githubUrl,
+        needsConfirmation: false
+      };
+    }
+
+    const createDirectory =
+      new RegExp("[创創]建|新建|建立|create|make|mkdir", "i").test(command) &&
+      new RegExp("文件夹|文件夾|目录|目錄|directory|folder", "i").test(command);
+    if (createDirectory) {
+      const match =
+        command.match(
+          new RegExp(
+            "(?:[创創]建|新建|建立)\\s*(?:一个|1个)?\\s*([A-Za-z0-9._-]+)\\s*(?:的)?(?:文件夹|文件夾|目录|目錄)"
+          )
+        ) ||
+        command.match(
+          /(?:create|make|mkdir)\s+(?:directory|folder)?\s*([~/A-Za-z0-9._-]+)/i
+        );
+      const name = safeString(match?.[1]);
+      if (!name) return undefined;
+      const inHome = new RegExp(
+        "用户目录|用戶目錄|家目录|家目錄|home|user directory",
+        "i"
+      ).test(command);
+      return {
+        type: "action",
+        serverId: server?.id,
+        serverName: server?.name,
+        action: "create_directory",
+        target:
+          inHome && !name.startsWith("/") && !name.startsWith("~")
+            ? `~/${name}`
+            : name,
+        needsConfirmation: false
+      };
+    }
+
+    if (
+      /(停止|结束|kill|stop)/i.test(command) &&
+      /(进程|process|pid)/i.test(command)
+    ) {
+      const target =
+        command.match(/\bpid\s*[:：]?\s*(\d+)/i)?.[1] ||
+        command.match(/\b(\d{2,})\b/)?.[1] ||
+        command.match(/(?:进程|process)\s*([A-Za-z0-9._-]+)/i)?.[1];
+      if (!target) return undefined;
+      return {
+        type: "action",
+        serverId: server?.id,
+        serverName: server?.name,
+        action: "stop_process",
+        target,
+        needsConfirmation: false
+      };
+    }
+
+    if (
+      /(资源|占用|详情|inspect|detail)/i.test(command) &&
+      /(进程|process|pid)/i.test(command)
+    ) {
+      const target =
+        command.match(/\bpid\s*[:：]?\s*(\d+)/i)?.[1] ||
+        command.match(/\b(\d{2,})\b/)?.[1] ||
+        command.match(/(?:进程|process)\s*([A-Za-z0-9._-]+)/i)?.[1];
+      if (target) {
+        return {
+          type: "action",
+          serverId: server?.id,
+          serverName: server?.name,
+          action: "process_inspect",
+          target,
+          needsConfirmation: false
+        };
+      }
+    }
+
+    if (/(进程|process)/i.test(command)) {
+      if (/(分析|作用|用途|analy[sz]e)/i.test(command)) {
+        return {
+          type: "action",
+          serverId: server?.id,
+          serverName: server?.name,
+          action: "analyze_processes",
+          needsConfirmation: false
+        };
+      }
+      if (/(明细|列表|所有|全部|list|all)/i.test(command)) {
+        return {
+          type: "action",
+          serverId: server?.id,
+          serverName: server?.name,
+          action: "process_list",
+          needsConfirmation: false
+        };
+      }
+    }
+
+    return undefined;
   }
 
   private planSimpleCommand(command: string): ActionPlan | undefined {
@@ -1416,7 +1744,13 @@ Actions:
 - check_docker
 - check_logs
 - check_top_processes
+- process_list
+- process_inspect, requires target PID or process keyword
+- analyze_processes
+- stop_process, requires target PID or process keyword
 - create_directory, requires target path. If the user says home/user directory, use ~/name.
+- deploy_project, requires target GitHub repository URL. Use for generic project deployment.
+- deploy_ttyd, requires target https://github.com/tsl0922/ttyd
 - check_port, requires target port
 - check_process, requires target process
 - restart_service, requires target service
@@ -2008,7 +2342,10 @@ fi
 }
 
 const VPS_AGENT_SOURCE = String.raw`from flask import Flask, request, jsonify
+import json
 import os
+import re
+import shutil
 import platform
 import socket
 import subprocess
@@ -2038,10 +2375,14 @@ ACTIONS = {
     "check_docker": "docker ps",
     "check_logs": "journalctl -n 80 --no-pager",
     "check_top_processes": "ps aux --sort=-%cpu | head -n 15",
+    "process_list": "ps -eo pid,ppid,user,stat,pcpu,pmem,etime,comm,args --sort=-pcpu | head -n 100",
+    "analyze_processes": "printf 'Top CPU/memory processes:\\n'; ps -eo pid,ppid,user,stat,pcpu,pmem,etime,comm,args --sort=-pcpu | head -n 40; printf '\\nRunning services:\\n'; systemctl list-units --type=service --state=running --no-pager 2>/dev/null | head -n 80 || true; printf '\\nListening ports:\\n'; ss -lntup 2>/dev/null | head -n 80 || true",
     "check_port": "ss -lntp | grep '{target}'",
     "check_process": "ps aux | grep '{target}' | grep -v grep",
+    "process_inspect": "printf 'Matched processes:\\n'; ps aux | grep '{target}' | grep -v grep; printf '\\nResource details:\\n'; pid=$(pgrep -f '{target}' | head -n 1); if [ -n \"$pid\" ]; then ps -p \"$pid\" -o pid,ppid,user,stat,pcpu,pmem,etime,comm,args; cat /proc/$pid/status 2>/dev/null | head -n 40; fi",
     "create_directory": "mkdir -p -- '{target}' && echo 'Directory created: {target}'",
     "restart_service": "systemctl restart '{target}'",
+    "stop_process": "if echo '{target}' | grep -Eq '^[0-9]+$'; then kill -TERM '{target}'; else pkill -TERM -f '{target}'; fi; echo 'Stop signal sent: {target}'",
     "service_health": "systemctl status '{target}' --no-pager; journalctl -u '{target}' -n 60 --no-pager",
     "server_summary": "printf 'hostname: '; hostname; printf 'os: '; . /etc/os-release && echo $PRETTY_NAME; printf 'uptime: '; uptime -p; printf 'load: '; cat /proc/loadavg; printf 'memory: '; free -m | awk 'NR==2{print $3\"/\"$2\" MB\"}'; printf 'disk: '; df -h / | awk 'NR==2{print $3\"/\"$2\" used, \"$5}'"
 }
