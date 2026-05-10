@@ -1186,10 +1186,13 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     if (plan.type !== "action") return `[EdgeButler] ${plan.text}`;
     plan.action = this.normalizeAction(plan.action);
 
-    const server = this.resolveServer(
-      plan.serverId || this.data.activeServerId,
-      plan.serverName
-    );
+    const mentionedServer = this.findMentionedServer(trimmed);
+    const server = mentionedServer
+      ? this.resolveServer(mentionedServer.id)
+      : this.resolveServer(
+          this.data.activeServerId || plan.serverId,
+          plan.serverName
+        );
     if (!server) {
       return "Please specify the VPS to operate on. Use a server name, ID, or add a server from the web console first.";
     }
@@ -1408,6 +1411,18 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     return servers.length === 1 ? servers[0] : undefined;
   }
 
+  private findMentionedServer(command: string) {
+    const lower = command.toLowerCase();
+    return [...this.data.servers]
+      .sort((left, right) => right.name.length - left.name.length)
+      .find(
+        (server) =>
+          lower.includes(server.name.toLowerCase()) ||
+          lower.includes(server.customName?.toLowerCase() || "\u0000") ||
+          lower.includes(server.id.toLowerCase())
+      );
+  }
+
   private handleSlashCommand(command: string) {
     if (!command.startsWith("/")) return undefined;
     const [rawName, ...rest] = command.slice(1).trim().split(/\s+/);
@@ -1529,7 +1544,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       "i"
     );
     const listPattern = new RegExp(
-      "\\u660e\\u7ec6|\\u5217\\u8868|\\u6240\\u6709|\\u5168\\u90e8|list|all",
+      "\\u660e\\u7ec6|\\u5217\\u8868|\\u6240\\u6709|\\u5168\\u90e8|\\u54ea\\u4e9b|\\u8fd0\\u884c|list|all|what|running",
       "i"
     );
 
