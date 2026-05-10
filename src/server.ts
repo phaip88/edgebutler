@@ -2691,6 +2691,113 @@ fi
 `;
 }
 
+function restartAgentScript() {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+INSTALL_DIR="/opt/edgebutler"
+RUNNER_FILE="$INSTALL_DIR/run-agent.sh"
+PID_FILE="$INSTALL_DIR/agent.pid"
+LOG_FILE="$INSTALL_DIR/agent.log"
+ERR_LOG_FILE="$INSTALL_DIR/agent.err"
+SERVICE_FILE="/etc/systemd/system/edgebutler-agent.service"
+INIT_FILE="/etc/init.d/edgebutler-agent"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Please run as root or with sudo."
+  exit 1
+fi
+
+if [ ! -x "$RUNNER_FILE" ]; then
+  echo "EdgeButler runner not found: $RUNNER_FILE"
+  echo "Please install the EdgeButler agent first."
+  exit 2
+fi
+
+stop_existing() {
+  pids=$(pgrep -f "$INSTALL_DIR/venv/bin/python $INSTALL_DIR/agent.py" || true)
+  for pid in $pids; do
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  done
+}
+
+write_supervisor_program() {
+  conf="$1"
+  if ! grep -q "\\[program:edgebutler-agent\\]" "$conf" 2>/dev/null; then
+    cat >> "$conf" <<EOF
+
+[program:edgebutler-agent]
+command=$RUNNER_FILE
+directory=$INSTALL_DIR
+autostart=true
+autorestart=true
+stopsignal=TERM
+stopasgroup=true
+killasgroup=true
+startretries=20
+startsecs=3
+stopwaitsecs=5
+stdout_logfile=$LOG_FILE
+stderr_logfile=$ERR_LOG_FILE
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=3
+stderr_logfile_maxbytes=10MB
+stderr_logfile_backups=3
+EOF
+  fi
+}
+
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] && [ -f "$SERVICE_FILE" ]; then
+  systemctl daemon-reload
+  systemctl enable edgebutler-agent >/dev/null 2>&1 || true
+  systemctl restart edgebutler-agent
+  systemctl --no-pager status edgebutler-agent
+  exit 0
+fi
+
+if command -v supervisorctl >/dev/null 2>&1 && [ -f /etc/zo/supervisord-user.conf ]; then
+  write_supervisor_program /etc/zo/supervisord-user.conf
+  stop_existing
+  supervisorctl -c /etc/zo/supervisord-user.conf reread || true
+  supervisorctl -c /etc/zo/supervisord-user.conf update || true
+  supervisorctl -c /etc/zo/supervisord-user.conf restart edgebutler-agent ||
+    supervisorctl -c /etc/zo/supervisord-user.conf start edgebutler-agent
+  supervisorctl -c /etc/zo/supervisord-user.conf status edgebutler-agent
+  exit 0
+fi
+
+if command -v supervisorctl >/dev/null 2>&1 && [ -d /etc/supervisor/conf.d ]; then
+  write_supervisor_program /etc/supervisor/conf.d/edgebutler-agent.conf
+  stop_existing
+  supervisorctl reread || true
+  supervisorctl update || true
+  supervisorctl restart edgebutler-agent || supervisorctl start edgebutler-agent
+  supervisorctl status edgebutler-agent
+  exit 0
+fi
+
+if command -v service >/dev/null 2>&1 && [ -x "$INIT_FILE" ]; then
+  service edgebutler-agent restart || true
+  if service edgebutler-agent status >/dev/null 2>&1; then
+    service edgebutler-agent status
+    exit 0
+  fi
+fi
+
+stop_existing
+nohup "$RUNNER_FILE" >> "$LOG_FILE" 2>> "$ERR_LOG_FILE" &
+echo $! > "$PID_FILE"
+sleep 2
+if kill -0 "$(cat "$PID_FILE")" >/dev/null 2>&1; then
+  echo "EdgeButler agent restarted with nohup fallback. PID: $(cat "$PID_FILE")"
+  exit 0
+fi
+
+echo "Failed to restart EdgeButler agent. Check $ERR_LOG_FILE"
+exit 1
+`;
+}
+
 const VPS_AGENT_SOURCE = String.raw`from flask import Flask, request, jsonify
 import json
 import os
@@ -2924,6 +3031,12 @@ export default {
             headers: { "Content-Type": "text/x-shellscript; charset=utf-8" }
           }
         );
+      }
+
+      if (url.pathname === "/restart-agent.sh" && request.method === "GET") {
+        return new Response(restartAgentScript(), {
+          headers: { "Content-Type": "text/x-shellscript; charset=utf-8" }
+        });
       }
 
       if (
