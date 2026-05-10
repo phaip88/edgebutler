@@ -140,6 +140,8 @@ const ACTIONS_REQUIRING_TARGET = new Set([
   "create_directory",
   "deploy_project",
   "deploy_ttyd",
+  "check_command",
+  "find_file",
   "check_port",
   "check_process",
   "process_inspect",
@@ -150,6 +152,31 @@ const ACTIONS_REQUIRING_TARGET = new Set([
 ]);
 
 const COMMAND_ACTIONS = new Set(["restart_service", "shell"]);
+const SUPPORTED_ACTIONS = new Set([
+  "check_memory",
+  "check_disk",
+  "check_cpu",
+  "check_os_version",
+  "check_network",
+  "check_docker",
+  "check_logs",
+  "check_top_processes",
+  "check_command",
+  "find_file",
+  "process_list",
+  "process_inspect",
+  "analyze_processes",
+  "stop_process",
+  "create_directory",
+  "deploy_project",
+  "deploy_ttyd",
+  "check_port",
+  "check_process",
+  "restart_service",
+  "service_health",
+  "server_summary",
+  "shell"
+]);
 const ACTION_ALIASES: Record<string, string> = {
   create_folder: "create_directory",
   mkdir: "create_directory",
@@ -159,6 +186,13 @@ const ACTION_ALIASES: Record<string, string> = {
   analyze_process: "analyze_processes",
   analyze_process_list: "analyze_processes",
   kill_process: "stop_process",
+  check_file: "find_file",
+  find_path: "find_file",
+  locate_file: "find_file",
+  which_command: "check_command",
+  check_app: "check_command",
+  check_application: "check_command",
+  check_ttyd: "check_command",
   deploy_ttyd_server: "deploy_ttyd",
   deploy_github_project: "deploy_project",
   deploy_repo: "deploy_project",
@@ -345,7 +379,6 @@ function isDeleteCommand(action: string, target = "", command = "") {
     /\bwipe\b/,
     /\bfind\b[\s\S]*\s-delete\b/,
     /\btruncate\s+-s\s*0\b/,
-    />\s*\/[^&\s]+/,
     /\bdd\b[\s\S]*\bof=\/dev\//,
     /\bdocker\s+(container\s+)?rm\b/,
     /\bdocker\s+(image\s+)?rmi\b/,
@@ -1185,6 +1218,17 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     }
     if (plan.type !== "action") return `[EdgeButler] ${plan.text}`;
     plan.action = this.normalizeAction(plan.action);
+    if (!SUPPORTED_ACTIONS.has(plan.action)) {
+      plan =
+        plan.command && !isDeleteCommand("shell", "", plan.command)
+          ? { ...plan, action: "shell", target: undefined }
+          : await this.planShellCommand(
+              trimmed,
+              `Previous planner returned unsupported action: ${plan.action}`
+            );
+      if (plan.type !== "action") return `[EdgeButler] ${plan.text}`;
+      plan.action = this.normalizeAction(plan.action);
+    }
 
     const mentionedServer = this.findMentionedServer(trimmed);
     const server = mentionedServer
@@ -1356,22 +1400,47 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     source: "web" | "telegram";
   }) {
     const agentInput = actionToAgentCommand(input);
-    const result = await this.callAgent(
+    let result = await this.callAgent(
       input.server,
       agentInput.action,
       agentInput.target,
       agentInput.command
     );
+    let executedCommand = input.command || agentInput.command;
+    let repairedCommand = "";
+    if (input.action === "shell" && result.ok === false) {
+      repairedCommand = await this.repairShellCommand({
+        userCommand: input.target || input.command || "",
+        failedCommand: executedCommand || "",
+        stdout: result.stdout || "",
+        stderr: result.stderr || ""
+      });
+      if (repairedCommand && repairedCommand !== executedCommand) {
+        result = await this.callAgent(
+          input.server,
+          "shell",
+          "",
+          repairedCommand
+        );
+        executedCommand = repairedCommand;
+      }
+    }
     const rawOutput = truncate(
       result.stdout || result.stderr || "Command completed without output."
     );
-    const summary = await this.summarize(input.action, input.target, rawOutput);
+    const summary = await this.summarize(
+      input.action,
+      input.target,
+      rawOutput,
+      executedCommand,
+      repairedCommand
+    );
 
     this.appendLog({
       source: input.source,
       action: input.action,
       target: input.target,
-      command: input.command || agentInput.command,
+      command: executedCommand,
       serverId: input.server.id,
       output: rawOutput
     });
@@ -1547,6 +1616,76 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       "\\u660e\\u7ec6|\\u5217\\u8868|\\u6240\\u6709|\\u5168\\u90e8|\\u54ea\\u4e9b|\\u8fd0\\u884c|list|all|what|running",
       "i"
     );
+    const filePattern = new RegExp(
+      "\\u6587\\u4ef6|\\u4f4d\\u7f6e|\\u8def\\u5f84|\\u5b89\\u88c5\\u4f4d\\u7f6e|file|path|where|which|locate|find",
+      "i"
+    );
+    const commandOnlyPattern = new RegExp(
+      "\\u7ed9\\u51fa|\\u544a\\u8bc9|\\u547d\\u4ee4|show.*command|give.*command",
+      "i"
+    );
+    const appPattern = new RegExp(
+      "\\u5e94\\u7528|\\u7a0b\\u5e8f|\\u8f6f\\u4ef6|\\u662f\\u5426\\u6709|\\u6709\\u6ca1\\u6709|app|application|program|installed",
+      "i"
+    );
+
+    const fileTarget =
+      command.match(/\bttyd\b/i)?.[0] ||
+      command.match(
+        /(?:file|path|where|which|locate|find)\s+([A-Za-z0-9._-]+)/i
+      )?.[1] ||
+      command.match(
+        /([A-Za-z0-9._-]+)\s*(?:\u7684)?\s*(?:\u6587\u4ef6|\u4f4d\u7f6e|\u8def\u5f84)/i
+      )?.[1];
+
+    if (filePattern.test(command) && commandOnlyPattern.test(command)) {
+      return {
+        type: "chat",
+        text: [
+          "查询文件位置常用命令：",
+          "command -v ttyd",
+          "find /usr/local/bin /usr/bin /bin /opt /etc/systemd/system -maxdepth 5 -iname '*ttyd*' 2>/dev/null | head -n 100"
+        ].join("\n")
+      };
+    }
+
+    if (filePattern.test(command) && fileTarget) {
+      const quotedTarget = shellQuote(fileTarget);
+      return {
+        type: "action",
+        serverId: server?.id,
+        serverName: server?.name,
+        action: "shell",
+        command: [
+          `target=${quotedTarget}`,
+          'printf "Command path:\\n"',
+          'command -v "$target" || true',
+          'printf "\\nFile matches:\\n"',
+          'find /usr/local/bin /usr/bin /bin /sbin /usr/sbin /opt /etc/systemd/system -maxdepth 6 -iname "*$target*" 2>/dev/null | head -n 100'
+        ].join("; "),
+        needsConfirmation: false
+      };
+    }
+
+    if (appPattern.test(command) && fileTarget) {
+      const quotedTarget = shellQuote(fileTarget);
+      return {
+        type: "action",
+        serverId: server?.id,
+        serverName: server?.name,
+        action: "shell",
+        command: [
+          `target=${quotedTarget}`,
+          'printf "Command path:\\n"',
+          'command -v "$target" || true',
+          'printf "\\nMatching files:\\n"',
+          'find /usr/local/bin /usr/bin /bin /opt /etc/systemd/system -maxdepth 5 -iname "*$target*" 2>/dev/null | head -n 100',
+          'printf "\\nPackage matches:\\n"',
+          '(dpkg -l 2>/dev/null || rpm -qa 2>/dev/null || true) | grep -i "$target" || true'
+        ].join("; "),
+        needsConfirmation: false
+      };
+    }
 
     if (stopPattern.test(command) && processPattern.test(command)) {
       const target =
@@ -1845,29 +1984,19 @@ Known servers:
 ${serverList || "- none"}
 
 Actions:
-- check_memory
-- check_disk
-- check_cpu
-- check_os_version
-- check_network
-- check_docker
-- check_logs
-- check_top_processes
-- process_list
-- process_inspect, requires target PID or process keyword
-- analyze_processes
-- stop_process, requires target PID or process keyword
+- shell, requires command. Use this for normal Linux/VPS operations.
+- deploy_project, requires target GitHub repository URL. Use only for external GitHub project deployment.
+- deploy_ttyd, requires target https://github.com/tsl0922/ttyd.
+- stop_process, requires target PID or process keyword. Use only when the user explicitly asks to stop/kill a process.
 - create_directory, requires target path. If the user says home/user directory, use ~/name.
-- deploy_project, requires target GitHub repository URL. Use for generic project deployment.
-- deploy_ttyd, requires target https://github.com/tsl0922/ttyd
-- check_port, requires target port
-- check_process, requires target process
-- restart_service, requires target service
-- service_health, requires target service
-- server_summary
-- shell, requires command
 
-Return chat for missing target/server.
+Planning policy:
+- For internal VPS administration, prefer shell. Do not invent actions such as check_file/check_ttyd/check_service unless listed above.
+- Generate real Linux shell commands from the user's request. Assume Debian/Ubuntu-compatible POSIX shell unless the user says otherwise.
+- Build commands with fallbacks when tools may be missing. Example: for ports, use ss if available, else netstat, else lsof, else /proc. For files/apps, use command -v plus find plus package query fallbacks.
+- Use read-only commands for query/analysis requests.
+- If the user asks to provide/show/give a command rather than execute it, return chat with the command text.
+- Return chat only for pure conversation or if a required target is genuinely missing.
 JSON format for chat: {"type":"chat","text":"..."}
 JSON format for action: {"type":"action","serverId":"...","serverName":"...","action":"...","target":"...","command":"...","needsConfirmation":false}
 All commands can execute directly. Deletion/removal/destructive erase commands will be intercepted by EdgeButler and require a yes/no confirmation in the web console.
@@ -1887,26 +2016,112 @@ All commands can execute directly. Deletion/removal/destructive erase commands w
       .trim();
     const parsedPlan = parseActionPlanText(text);
     if (parsedPlan) return parsedPlan;
-
-    try {
-      const parsed = JSON.parse(text) as ActionPlan;
-      return parsed;
-    } catch {
-      return {
-        type: "chat",
-        text: `AI 指令解析失败，请换一种说法。原始输出: ${text}`
-      };
-    }
+    return await this.planShellCommand(
+      command,
+      `Primary planner returned invalid JSON: ${text}`
+    );
   }
 
   private normalizeAction(action: string) {
     return ACTION_ALIASES[action] || action;
   }
 
+  private async planShellCommand(
+    userCommand: string,
+    reason?: string
+  ): Promise<ActionPlan> {
+    const systemPrompt = [
+      "You are EdgeButler's Linux shell planner.",
+      "Return JSON only. Do not use markdown.",
+      "Create one safe, practical /bin/sh compatible command for the user's VPS administration request.",
+      "Assume Debian/Ubuntu-compatible Linux unless the user says otherwise.",
+      "Use fallbacks for missing tools. Prefer read-only commands for query/analysis.",
+      "For OS/distribution queries, prefer: cat /etc/os-release; uname -a.",
+      "For package manager queries, use: for c in apt apt-get dpkg yum dnf apk pacman zypper rpm; do command -v $c; done.",
+      "For port queries, use: (command -v ss && ss -lntup) || (command -v netstat && netstat -lntup) || (command -v lsof && lsof -i) || cat /proc/net/tcp /proc/net/tcp6.",
+      "For file/application location queries, use command -v plus find across /usr/local/bin /usr/bin /bin /sbin /usr/sbin /opt /etc/systemd/system.",
+      "If the user asks to provide/show/give a command instead of executing, return chat.",
+      'JSON shell format: {"type":"action","action":"shell","command":"...","needsConfirmation":false}',
+      'JSON chat format: {"type":"chat","text":"..."}',
+      "Do not generate destructive delete/remove commands unless the user explicitly asks; EdgeButler will require confirmation."
+    ].join("\n");
+    const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: [
+            reason ? `Planner note: ${reason}` : "",
+            `User request: ${userCommand}`
+          ]
+            .filter(Boolean)
+            .join("\n")
+        }
+      ]
+    });
+    const text = String(response.response || "")
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+    const parsedPlan = parseActionPlanText(text);
+    if (parsedPlan) return parsedPlan;
+    return {
+      type: "chat",
+      text: `AI shell planner failed to return valid JSON. Raw output: ${text}`
+    };
+  }
+
+  private async repairShellCommand(input: {
+    userCommand: string;
+    failedCommand: string;
+    stdout: string;
+    stderr: string;
+  }) {
+    if (!input.failedCommand || (!input.stderr && input.stdout)) return "";
+    const response = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are EdgeButler's shell repair planner.",
+            "Return JSON only.",
+            "Given a failed Linux shell command and its error, return one corrected /bin/sh compatible command.",
+            'Use fallbacks for missing tools. If there is no useful repair, return {"type":"chat","text":"..."}.',
+            "If a command is not found, replace it with a portable fallback rather than repeating it.",
+            "For lsb_release missing, use cat /etc/os-release and uname -a.",
+            'JSON shell format: {"type":"action","action":"shell","command":"...","needsConfirmation":false}'
+          ].join("\n")
+        },
+        {
+          role: "user",
+          content: [
+            `User request: ${input.userCommand}`,
+            `Failed command: ${input.failedCommand}`,
+            "stdout:",
+            input.stdout,
+            "stderr:",
+            input.stderr
+          ].join("\n")
+        }
+      ]
+    });
+    const text = String(response.response || "")
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+    const parsedPlan = parseActionPlanText(text);
+    if (parsedPlan?.type === "action" && parsedPlan.command) {
+      return parsedPlan.command;
+    }
+    return "";
+  }
+
   private async summarize(
     action: string,
     target: string | undefined,
-    rawOutput: string
+    rawOutput: string,
+    command?: string,
+    repairedCommand?: string
   ) {
     const summaryRes = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
       messages: [
@@ -1915,10 +2130,14 @@ All commands can execute directly. Deletion/removal/destructive erase commands w
           content: [
             `Action: ${action}`,
             `Target: ${target || "none"}`,
+            command ? `Executed command: ${command}` : "",
+            repairedCommand ? `Auto-repaired command: ${repairedCommand}` : "",
             "Raw server output:",
             rawOutput,
-            "Please summarize the result in concise Chinese. Mention errors or empty output directly."
-          ].join("\n")
+            "Please summarize the result in concise Chinese. Mention the executed command when useful. Mention errors or empty output directly."
+          ]
+            .filter(Boolean)
+            .join("\n")
         }
       ]
     });
@@ -2506,6 +2725,8 @@ ACTIONS = {
     "check_docker": "docker ps",
     "check_logs": "journalctl -n 80 --no-pager",
     "check_top_processes": "ps aux --sort=-%cpu | head -n 15",
+    "check_command": "printf 'Command path:\\n'; command -v '{target}' || true; printf '\\nMatching files:\\n'; find /usr/local/bin /usr/bin /bin /opt /etc/systemd/system -maxdepth 5 -iname '*{target}*' 2>/dev/null | head -n 100; printf '\\nPackage matches:\\n'; (dpkg -l 2>/dev/null || rpm -qa 2>/dev/null || true) | grep -i '{target}' || true",
+    "find_file": "printf 'Command path:\\n'; command -v '{target}' || true; printf '\\nFile matches:\\n'; find /usr/local/bin /usr/bin /bin /sbin /usr/sbin /opt /etc/systemd/system -maxdepth 6 -iname '*{target}*' 2>/dev/null | head -n 100",
     "process_list": "ps -eo pid,ppid,user,stat,pcpu,pmem,etime,comm,args --sort=-pcpu | head -n 100",
     "analyze_processes": "printf 'Top CPU/memory processes:\\n'; ps -eo pid,ppid,user,stat,pcpu,pmem,etime,comm,args --sort=-pcpu | head -n 40; printf '\\nRunning services:\\n'; systemctl list-units --type=service --state=running --no-pager 2>/dev/null | head -n 80 || true; printf '\\nListening ports:\\n'; ss -lntup 2>/dev/null | head -n 80 || true",
     "check_port": "ss -lntp | grep '{target}'",
