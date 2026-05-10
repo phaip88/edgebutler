@@ -142,7 +142,7 @@ const ACTIONS_REQUIRING_TARGET = new Set([
   "shell"
 ]);
 
-const MUTATING_ACTIONS = new Set(["restart_service", "shell"]);
+const COMMAND_ACTIONS = new Set(["restart_service", "shell"]);
 const ACTION_ALIASES: Record<string, string> = {
   check_system_status: "server_summary",
   system_status: "server_summary",
@@ -299,6 +299,85 @@ function truncate(value: string, limit = 4000) {
     : value;
 }
 
+function isDeleteCommand(action: string, target = "", command = "") {
+  const text = `${action} ${target} ${command}`.toLowerCase();
+  return [
+    /\brm\s+(-[^\s]*\s+)*[^-\s]/,
+    /\brm\s+-[^\s]*r[^\s]*/,
+    /\brmdir\b/,
+    /\bunlink\b/,
+    /\bshred\b/,
+    /\bwipe\b/,
+    /\bfind\b[\s\S]*\s-delete\b/,
+    /\btruncate\s+-s\s*0\b/,
+    />\s*\/[^&\s]+/,
+    /\bdd\b[\s\S]*\bof=\/dev\//,
+    /\bdocker\s+(container\s+)?rm\b/,
+    /\bdocker\s+(image\s+)?rmi\b/,
+    /\bpodman\s+(container\s+)?rm\b/,
+    /\bpodman\s+(image\s+)?rmi\b/,
+    /\bkubectl\s+delete\b/,
+    /\bapt(-get)?\s+(purge|remove)\b/,
+    /\byum\s+remove\b/,
+    /\bdnf\s+remove\b/,
+    /\bsystemctl\s+(disable|mask)\b/
+  ].some((pattern) => pattern.test(text));
+}
+
+function extractJsonObjects(text: string) {
+  const objects: string[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+    if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        objects.push(text.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+  return objects;
+}
+
+function parseActionPlanText(text: string): ActionPlan | undefined {
+  const candidates = [text, ...extractJsonObjects(text)];
+  const parsed = candidates
+    .map((candidate) => {
+      try {
+        return JSON.parse(candidate) as ActionPlan;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((item): item is ActionPlan => Boolean(item?.type));
+  return parsed.find((item) => item.type === "action") || parsed[0];
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -378,7 +457,7 @@ async function setTelegramWebhook(token: string, webhookUrl: string) {
 export class EdgeButler extends Agent<Env, EdgeButlerState> {
   initialState: EdgeButlerState = {
     rules:
-      "Prefer safe built-in actions. Shell commands require user confirmation.",
+      "All commands can execute directly. Delete/remove commands require yes/no confirmation.",
     history: [],
     servers: [],
     installTokens: [],
@@ -476,7 +555,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   async updateRules(input: { rules?: string }) {
     const rules =
       safeString(input.rules) ||
-      "Prefer safe built-in actions. Shell commands require user confirmation.";
+      "All commands can execute directly. Delete/remove commands require yes/no confirmation.";
     this.save({ rules });
     this.appendLog({
       source: "web",
@@ -1050,17 +1129,17 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       return `Please provide a target for ${plan.action}, such as a service name, port, process name, or shell command.`;
     }
 
-    if (MUTATING_ACTIONS.has(plan.action)) {
+    if (isDeleteCommand(plan.action, plan.target, plan.command)) {
       const pending = this.createPendingOperation(server, plan, source);
       return [
-        "This operation requires confirmation before execution.",
+        "This delete/remove operation requires yes/no confirmation before execution.",
         `Confirmation ID: ${pending.id}`,
         `Server: ${server.name}`,
         `Action: ${plan.action}`,
         plan.command
           ? `Command: ${plan.command}`
           : `Target: ${plan.target || ""}`,
-        "Confirm it from the web console."
+        "Confirm yes or no from the web console."
       ].join("\n");
     }
 
@@ -1190,7 +1269,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       command: plan.command
     });
     void this.notifyAll(
-      `[EdgeButler] Confirmation required: ${plan.action} on ${server.name}. ID: ${pending.id}`
+      `[EdgeButler] Delete confirmation required: ${plan.action} on ${server.name}. Reply yes/no in the web console. ID: ${pending.id}`
     );
     return pending;
   }
@@ -1222,7 +1301,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       output: rawOutput
     });
 
-    if (MUTATING_ACTIONS.has(input.action)) {
+    if (COMMAND_ACTIONS.has(input.action)) {
       void this.notifyAll(
         `[EdgeButler] Executed ${input.action} on ${input.server.name}.`
       );
@@ -1278,15 +1357,15 @@ Actions:
 - check_top_processes
 - check_port, requires target port
 - check_process, requires target process
-- restart_service, requires target service. Set needsConfirmation false unless the user explicitly says they already confirm execution.
+- restart_service, requires target service
 - service_health, requires target service
 - server_summary
-- shell, requires command. Set needsConfirmation false unless the user explicitly says they already confirm execution.
+- shell, requires command
 
 Return chat for missing target/server.
 JSON format for chat: {"type":"chat","text":"..."}
 JSON format for action: {"type":"action","serverId":"...","serverName":"...","action":"...","target":"...","command":"...","needsConfirmation":false}
-For mutating actions, return an action with needsConfirmation false first so the web console can create a pending confirmation. Only set needsConfirmation true when the user explicitly confirms an existing operation.
+All commands can execute directly. Deletion/removal/destructive erase commands will be intercepted by EdgeButler and require a yes/no confirmation in the web console.
 `;
 
     const aiResponse = await this.env.AI.run("@cf/meta/llama-3-8b-instruct", {
@@ -1301,6 +1380,8 @@ For mutating actions, return an action with needsConfirmation false first so the
       .replace(/```json/g, "")
       .replace(/```/g, "")
       .trim();
+    const parsedPlan = parseActionPlanText(text);
+    if (parsedPlan) return parsedPlan;
 
     try {
       const parsed = JSON.parse(text) as ActionPlan;

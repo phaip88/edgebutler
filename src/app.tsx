@@ -121,7 +121,7 @@ const text = {
     expires: "Expires",
     aiOps: "AI Operations",
     aiOpsHelp:
-      "Ask for diagnostics or operations. Mutating actions require web confirmation.",
+      "Ask for diagnostics or operations. All commands execute directly; delete/remove commands require yes/no confirmation.",
     aiRules: "AI System Rules",
     aiRulesHelp:
       "These rules are injected into the AI planning prompt for every web and Telegram command.",
@@ -129,9 +129,9 @@ const text = {
     rulesSaved: "AI system rules saved.",
     runAi: "Run AI command",
     pendingTitle: "Pending Confirmations",
-    pendingHelp: "Mutating operations expire after 10 minutes.",
-    confirm: "Confirm",
-    cancel: "Cancel",
+    pendingHelp: "Delete/remove confirmations expire after 10 minutes.",
+    confirm: "Yes, execute",
+    cancel: "No, cancel",
     notificationTitle: "Notification Channels",
     notificationHelp:
       "Configure Telegram, Enterprise WeChat, or generic webhooks.",
@@ -945,7 +945,7 @@ export default function App() {
               <textarea
                 value={rules}
                 onChange={(event) => setRules(event.target.value)}
-                placeholder="Prefer safe built-in actions. Shell commands require user confirmation."
+                placeholder="All commands can execute directly. Delete/remove commands require yes/no confirmation."
               />
               <div className="button-row">
                 <button disabled={loading} onClick={saveRules}>
