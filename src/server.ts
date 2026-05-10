@@ -1202,6 +1202,38 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     const trimmed = command.trim();
     if (!trimmed) return "Please enter an operations command.";
 
+    if (trimmed.toLowerCase().startsWith("/all ")) {
+      return await this.runOnServers(
+        this.data.servers.filter(
+          (server) => withDerivedServerStatus(server).status === "online"
+        ),
+        trimmed.slice(5).trim(),
+        source,
+        "all_vps"
+      );
+    }
+
+    if (trimmed.toLowerCase().startsWith("/on ")) {
+      const [, names = "", scopedCommand = ""] =
+        trimmed.match(/^\/on\s+([^\s]+)\s+([\s\S]+)$/i) || [];
+      if (!names || !scopedCommand) {
+        return "[EdgeButler] Usage: /on zo,zo2 <command>";
+      }
+      const servers = names
+        .split(",")
+        .map((name) => this.resolveServer(undefined, name.trim()))
+        .filter((server): server is ManagedServer => Boolean(server));
+      if (!servers.length) {
+        return `[EdgeButler] No matching VPS found for: ${names}`;
+      }
+      return await this.runOnServers(
+        servers,
+        scopedCommand,
+        source,
+        "selected_vps"
+      );
+    }
+
     const slash = this.handleSlashCommand(trimmed);
     if (slash) return slash;
 
@@ -1217,6 +1249,9 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     if (this.data.mode === "chat") {
       return await this.chatOnly(trimmed);
     }
+
+    const targetMessage = this.targetMissingMessage(trimmed);
+    if (targetMessage) return targetMessage;
 
     if (!this.data.activeServerId && !this.findMentionedServer(trimmed)) {
       const platformScopeBlock = this.platformScopeBlockMessage(trimmed);
@@ -1266,6 +1301,13 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       !plan.command
     ) {
       return `Please provide a target for ${plan.action}, such as a service name, port, process name, or shell command.`;
+    }
+
+    if (this.isBroadServiceControl(plan.action, plan.target, plan.command)) {
+      return (
+        this.targetMissingMessage(trimmed) ||
+        "Please provide a concrete service name."
+      );
     }
 
     if (isDeleteCommand(plan.action, plan.target, plan.command)) {
@@ -1377,6 +1419,84 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       } ${item.value.output ? `- ${item.value.output}` : ""}`;
     });
     return [`[Endpoint Update] ${endpoint}`, ...lines].join("\n");
+  }
+
+  private async runOnServers(
+    servers: ManagedServer[],
+    command: string,
+    source: "web" | "telegram",
+    scope: "all_vps" | "selected_vps"
+  ) {
+    const trimmed = command.trim();
+    if (!trimmed) return `[EdgeButler] Missing command for ${scope}.`;
+
+    const targetMessage = this.targetMissingMessage(trimmed);
+    if (targetMessage) return targetMessage;
+
+    let plan =
+      this.planBuiltInCommand(trimmed) ||
+      this.planSimpleCommand(trimmed) ||
+      (await this.plan(trimmed));
+    if (plan.type !== "action") return `[EdgeButler] ${plan.text}`;
+    plan.action = this.normalizeAction(plan.action);
+    if (!SUPPORTED_ACTIONS.has(plan.action)) {
+      plan =
+        plan.command && !isDeleteCommand("shell", "", plan.command)
+          ? { ...plan, action: "shell", target: undefined }
+          : await this.planShellCommand(
+              trimmed,
+              `Previous planner returned unsupported action: ${plan.action}`
+            );
+      if (plan.type !== "action") return `[EdgeButler] ${plan.text}`;
+      plan.action = this.normalizeAction(plan.action);
+    }
+
+    if (isDeleteCommand(plan.action, plan.target, plan.command)) {
+      return [
+        "[EdgeButler] Command not executed",
+        `Reason: destructive operations are blocked in ${scope}.`,
+        "Run the command on one selected VPS instead, then confirm from the web console."
+      ].join("\n");
+    }
+
+    if (this.isBroadServiceControl(plan.action, plan.target, plan.command)) {
+      return (
+        this.targetMissingMessage(trimmed) ||
+        "Please provide a concrete service name."
+      );
+    }
+
+    const targets =
+      scope === "all_vps"
+        ? servers.filter(
+            (server) => withDerivedServerStatus(server).status === "online"
+          )
+        : servers;
+    if (!targets.length) {
+      return `[EdgeButler] No online VPS available for ${scope}.`;
+    }
+
+    const results = await Promise.allSettled(
+      targets.map(async (server) => {
+        const text = await this.executeOperation({
+          server,
+          action: plan.action,
+          target: plan.target,
+          command: plan.command,
+          source
+        });
+        return `## ${server.name}\n${text}`;
+      })
+    );
+
+    return [
+      `[EdgeButler] ${scope} result`,
+      ...results.map((result, index) =>
+        result.status === "fulfilled"
+          ? result.value
+          : `## ${targets[index]?.name || "unknown"}\nfailed: ${result.reason?.message || result.reason}`
+      )
+    ].join("\n\n");
   }
 
   private createPendingOperation(
@@ -1528,6 +1648,8 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
         "/new <vps> - clear context and lock following commands to that VPS",
         "/new - clear context and active VPS",
         "/<vps> - switch active VPS, for example /zo or /zo2",
+        "/all <command> - run on every online VPS one by one",
+        "/on zo,zo2 <command> - run on selected VPS",
         "/chat - chat mode, AI only answers and does not execute",
         "/new or /<vps> - leave chat mode and return to the default executable mode",
         "/mode - show current mode and active VPS",
@@ -1688,6 +1810,43 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       ? this.scopeMissingMessage("vps_operation")
       : undefined;
   }
+
+  private targetMissingMessage(command: string) {
+    const trimmed = command.trim();
+    const serviceControl =
+      /^(停止|启动|重启|重载)\s*(服务|service)?\s*$/i.test(trimmed) ||
+      /^(stop|start|restart|reload)\s+(service|systemd service)$/i.test(
+        trimmed
+      );
+    const processControl = /^(停止|结束|kill|stop)\s*(进程|process)?\s*$/i.test(
+      trimmed
+    );
+    if (!serviceControl && !processControl) return undefined;
+    return [
+      "[EdgeButler] Command not executed",
+      "",
+      "Reason: the command is missing a concrete target.",
+      "Please provide a service name, process name, PID, file path, or project URL.",
+      "",
+      "Examples:",
+      "停止 nginx",
+      "重启 ssh",
+      "停止 PID 1234",
+      "查询 ttyd 的进程"
+    ].join("\n");
+  }
+
+  private isBroadServiceControl(action: string, target = "", command = "") {
+    const text = `${action} ${target} ${command}`.toLowerCase();
+    return (
+      /\bservice\s+--status-all\b/.test(text) ||
+      /\bxargs\s+(sudo\s+)?service\s+(stop|restart|reload|start)\b/.test(
+        text
+      ) ||
+      /\bsystemctl\s+(stop|restart|reload|start)\s+\$/.test(text)
+    );
+  }
+
   private scopeMissingMessage(action: string, target = "", command = "") {
     return [
       "[EdgeButler] Command not executed",
