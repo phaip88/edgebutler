@@ -175,6 +175,7 @@ const JSON_HEADERS = {
 
 const SESSION_COOKIE = "eb_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
+const AGENT_OFFLINE_AFTER_MS = 30_000;
 
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -316,6 +317,21 @@ function truncate(value: string, limit = 4000) {
   return value.length > limit
     ? `${value.slice(0, limit)}...(truncated)`
     : value;
+}
+
+function isServerRecentlySeen(server: ManagedServer) {
+  return (
+    !!server.lastSeenAt &&
+    Date.now() - Date.parse(server.lastSeenAt) <= AGENT_OFFLINE_AFTER_MS
+  );
+}
+
+function withDerivedServerStatus(server: ManagedServer): ManagedServer {
+  if (server.status === "pending") return server;
+  return {
+    ...server,
+    status: isServerRecentlySeen(server) ? "online" : "offline"
+  };
 }
 
 function isDeleteCommand(action: string, target = "", command = "") {
@@ -581,7 +597,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   @callable()
   async listServers() {
     return this.data.servers.map((server) => {
-      const publicServer = { ...server };
+      const publicServer = withDerivedServerStatus(server);
       delete (publicServer as Partial<ManagedServer>).token;
       return publicServer;
     });
@@ -1113,9 +1129,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   @callable()
   async createAgentEndpointUpdate(input: { endpoint?: string }) {
     const endpoint = normalizeEndpoint(safeString(input.endpoint));
-    const onlineServers = this.data.servers.filter(
-      (server) => server.status === "online"
-    );
+    const onlineServers = this.data.servers.filter(isServerRecentlySeen);
     if (onlineServers.length === 0) {
       throw new Error("No online VPS is available for endpoint update.");
     }
@@ -1160,11 +1174,16 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       return await this.chatOnly(trimmed);
     }
 
-    const plan =
+    let plan =
       this.planBuiltInCommand(trimmed) ||
       this.planSimpleCommand(trimmed) ||
       (await this.plan(trimmed));
-    if (plan.type === "chat") return `[EdgeButler] ${plan.text}`;
+    if (plan.type === "chat") {
+      const fallback = this.planActiveServerFallback(trimmed);
+      if (!fallback) return `[EdgeButler] ${plan.text}`;
+      plan = fallback;
+    }
+    if (plan.type !== "action") return `[EdgeButler] ${plan.text}`;
     plan.action = this.normalizeAction(plan.action);
 
     const server = this.resolveServer(
@@ -1267,9 +1286,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   private async executeBulkEndpointUpdate(pending: PendingOperation) {
     const endpoint = safeString(pending.target);
     const command = pending.command || endpointUpdateCommand(endpoint);
-    const servers = this.data.servers.filter(
-      (server) => server.status === "online"
-    );
+    const servers = this.data.servers.filter(isServerRecentlySeen);
     const results = await Promise.allSettled(
       servers.map(async (server) => {
         const result = await this.callAgent(server, "shell", "", command);
@@ -1532,6 +1549,25 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       };
     }
 
+    if (stopPattern.test(command)) {
+      const target =
+        command.match(/\b(\d{2,})\b/)?.[1] ||
+        command.match(
+          /(?:\u505c\u6b62|\u7ed3\u675f|kill|stop)\s*([A-Za-z0-9._-]+)/i
+        )?.[1] ||
+        command.match(/([A-Za-z0-9._-]+)\s*(?:\u7684)?\s*\u8fd0\u884c/i)?.[1];
+      if (target) {
+        return {
+          type: "action",
+          serverId: server?.id,
+          serverName: server?.name,
+          action: "stop_process",
+          target,
+          needsConfirmation: false
+        };
+      }
+    }
+
     if (inspectPattern.test(command) && processPattern.test(command)) {
       const target =
         command.match(/\bpid\s*[:：]?\s*(\d+)/i)?.[1] ||
@@ -1580,6 +1616,26 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
           ? "deploy_ttyd"
           : "deploy_project",
         target: githubUrl,
+        needsConfirmation: false
+      };
+    }
+
+    const robustGithubUrl = command.match(
+      /https:\/\/github\.com\/[^\s\uff0c\u3002]+/i
+    )?.[0];
+    const deployPattern = new RegExp(
+      "\\u90e8\\u7f72|\\u5b89\\u88c5|\\u642d\\u5efa|deploy|install|setup",
+      "i"
+    );
+    if (robustGithubUrl && deployPattern.test(command)) {
+      return {
+        type: "action",
+        serverId: server?.id,
+        serverName: server?.name,
+        action: robustGithubUrl.toLowerCase().includes("tsl0922/ttyd")
+          ? "deploy_ttyd"
+          : "deploy_project",
+        target: robustGithubUrl,
         needsConfirmation: false
       };
     }
@@ -1677,6 +1733,44 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     }
 
     return undefined;
+  }
+
+  private planActiveServerFallback(command: string): ActionPlan | undefined {
+    if (!this.data.activeServerId) return undefined;
+    const githubUrl = command.match(
+      /https:\/\/github\.com\/[^\s\uff0c\u3002]+/i
+    )?.[0];
+    if (githubUrl) {
+      return {
+        type: "action",
+        serverId: this.data.activeServerId,
+        action: githubUrl.toLowerCase().includes("tsl0922/ttyd")
+          ? "deploy_ttyd"
+          : "deploy_project",
+        target: githubUrl,
+        needsConfirmation: false
+      };
+    }
+
+    const stopPattern = new RegExp(
+      "\\u505c\\u6b62|\\u7ed3\\u675f|kill|stop",
+      "i"
+    );
+    if (!stopPattern.test(command)) return undefined;
+    const target =
+      command.match(/\b(\d{2,})\b/)?.[1] ||
+      command.match(
+        /(?:\u505c\u6b62|\u7ed3\u675f|kill|stop)\s*([A-Za-z0-9._-]+)/i
+      )?.[1] ||
+      command.match(/([A-Za-z0-9._-]+)\s*(?:\u7684)?\s*\u8fd0\u884c/i)?.[1];
+    if (!target) return undefined;
+    return {
+      type: "action",
+      serverId: this.data.activeServerId,
+      action: "stop_process",
+      target,
+      needsConfirmation: false
+    };
   }
 
   private planSimpleCommand(command: string): ActionPlan | undefined {
@@ -1822,6 +1916,20 @@ All commands can execute directly. Deletion/removal/destructive erase commands w
     target = "",
     command = ""
   ): Promise<{ ok: boolean; stdout?: string; stderr?: string; code?: number }> {
+    if (!isServerRecentlySeen(server)) {
+      this.save({
+        servers: this.data.servers.map((item) =>
+          item.id === server.id
+            ? { ...item, status: "offline" as const, updatedAt: nowIso() }
+            : item
+        )
+      });
+      return {
+        ok: false,
+        stderr: `Agent is offline. Last heartbeat: ${server.lastSeenAt || "never"}.`
+      };
+    }
+
     const now = nowIso();
     const task: AgentTask = {
       id: randomId("task"),
@@ -1857,6 +1965,14 @@ All commands can execute directly. Deletion/removal/destructive erase commands w
         };
       }
     }
+
+    this.save({
+      servers: this.data.servers.map((item) =>
+        item.id === server.id
+          ? { ...item, status: "offline" as const, updatedAt: nowIso() }
+          : item
+      )
+    });
 
     return {
       ok: false,
@@ -2382,7 +2498,6 @@ ACTIONS = {
     "process_inspect": "printf 'Matched processes:\\n'; ps aux | grep '{target}' | grep -v grep; printf '\\nResource details:\\n'; pid=$(pgrep -f '{target}' | head -n 1); if [ -n \"$pid\" ]; then ps -p \"$pid\" -o pid,ppid,user,stat,pcpu,pmem,etime,comm,args; cat /proc/$pid/status 2>/dev/null | head -n 40; fi",
     "create_directory": "mkdir -p -- '{target}' && echo 'Directory created: {target}'",
     "restart_service": "systemctl restart '{target}'",
-    "stop_process": "if echo '{target}' | grep -Eq '^[0-9]+$'; then kill -TERM '{target}'; else pkill -TERM -f '{target}'; fi; echo 'Stop signal sent: {target}'",
     "service_health": "systemctl status '{target}' --no-pager; journalctl -u '{target}' -n 60 --no-pager",
     "server_summary": "printf 'hostname: '; hostname; printf 'os: '; . /etc/os-release && echo $PRETTY_NAME; printf 'uptime: '; uptime -p; printf 'load: '; cat /proc/loadavg; printf 'memory: '; free -m | awk 'NR==2{print $3\"/\"$2\" MB\"}'; printf 'disk: '; df -h / | awk 'NR==2{print $3\"/\"$2\" used, \"$5}'"
 }
@@ -2393,6 +2508,48 @@ def run_command(cmd):
 
 def shell_quote(value):
     return "'" + str(value).replace("'", "'\\''") + "'"
+
+def stop_process(target):
+    target = str(target or "").strip()
+    if not target:
+        return {"stdout": "", "stderr": "target is required", "code": 2}
+    current_pid = os.getpid()
+    candidates = []
+    if target.isdigit():
+        candidates = [int(target)]
+    else:
+        ps = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=30)
+        for line in ps.stdout.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) != 2:
+                continue
+            pid = int(parts[0])
+            args = parts[1]
+            if pid == current_pid or "edgebutler/agent.py" in args:
+                continue
+            if target.lower() in args.lower():
+                candidates.append(pid)
+    if not candidates:
+        return {"stdout": "", "stderr": f"no process matched: {target}", "code": 1}
+    stopped = []
+    errors = []
+    for pid in sorted(set(candidates)):
+        if pid in (0, 1, current_pid):
+            continue
+        try:
+            os.kill(pid, 15)
+            stopped.append(pid)
+        except ProcessLookupError:
+            continue
+        except PermissionError as exc:
+            errors.append(f"{pid}: {exc}")
+    if not stopped and errors:
+        return {"stdout": "", "stderr": "\\n".join(errors), "code": 1}
+    return {
+        "stdout": f"Stop signal sent to PID(s): {', '.join(map(str, stopped))}\\nTarget: {target}",
+        "stderr": "\\n".join(errors),
+        "code": 0 if stopped else 1,
+    }
 
 def execute_action(action, target="", command=""):
     target = str(target or "")
@@ -2408,6 +2565,8 @@ def execute_action(action, target="", command=""):
         if not path.startswith(("/", "~")):
             path = os.path.join(os.path.expanduser("~"), path)
         return run_command(f"mkdir -p -- {shell_quote(path)} && echo {shell_quote('Directory created: ' + path)}")
+    if action == "stop_process":
+        return stop_process(target)
     if action not in ACTIONS:
         return {"stdout": "", "stderr": f"unsupported action: {action}", "code": 2}
     template = ACTIONS[action]
