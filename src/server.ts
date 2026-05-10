@@ -1512,8 +1512,8 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
         "/new <vps> - clear context and lock following commands to that VPS",
         "/new - clear context and active VPS",
         "/<vps> - switch active VPS, for example /zo or /zo2",
-        "/exec - execution mode, AI can run operations",
         "/chat - chat mode, AI only answers and does not execute",
+        "/new or /<vps> - leave chat mode and return to the default executable mode",
         "/mode - show current mode and active VPS",
         "/h - show this help",
         "",
@@ -1534,16 +1534,11 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       this.save({
         history: [],
         activeServerId: server?.id,
-        mode: this.data.mode || "execute"
+        mode: "execute"
       });
       return server
         ? `[Context] New session. Active VPS: ${server.name}`
         : "[Context] New session. Active VPS cleared.";
-    }
-
-    if (name === "exec" || (name === "mode" && arg === "exec")) {
-      this.save({ mode: "execute" });
-      return "[Mode] execution mode enabled.";
     }
 
     if (name === "chat" || (name === "mode" && arg === "chat")) {
@@ -1562,7 +1557,7 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
 
     const server = this.resolveServer(undefined, name);
     if (server) {
-      this.save({ activeServerId: server.id });
+      this.save({ activeServerId: server.id, mode: "execute" });
       return `[Context] Active VPS: ${server.name}`;
     }
 
