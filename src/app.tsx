@@ -304,67 +304,6 @@ function StatusPill({
   );
 }
 
-function Snapshot({
-  snapshot,
-  language
-}: {
-  snapshot?: ServerSnapshot;
-  language: Language;
-}) {
-  const t = text[language];
-  if (!snapshot)
-    return <p className="text-slate-500 italic text-sm">{t.noSnapshot}</p>;
-  const items = [
-    ["Host", snapshot.hostname],
-    ["OS", snapshot.os],
-    ["Uptime", snapshot.uptime],
-    ["Load", snapshot.load],
-    ["Memory", snapshot.memory],
-    ["Disk", snapshot.disk]
-  ];
-
-  return (
-    <div className="grid grid-cols-2 gap-3 mt-4">
-      {items.map(([label, value]) => {
-        // Simple heuristic to extract percentage for visual bars
-        let percent = 0;
-        if (value && (label === "Memory" || label === "Disk")) {
-          const match = value.match(/(\d+)%/);
-          if (match) {
-            percent = parseInt(match[1]);
-          } else if (label === "Memory") {
-            const parts = value.match(/(\d+)\/(\d+)\s*MB/);
-            if (parts)
-              percent = (parseInt(parts[1]) / parseInt(parts[2])) * 100;
-          }
-        }
-
-        return (
-          <div
-            key={label}
-            className="bg-white/5 border border-white/5 rounded-xl p-3 relative overflow-hidden ui-bg-scanline"
-          >
-            <dt className="text-[10px] uppercase tracking-widest text-slate-500 font-black mb-1">
-              {label}
-            </dt>
-            <dd className="text-slate-200 text-sm font-bold truncate relative z-10">
-              {value || "-"}
-            </dd>
-            {percent > 0 && (
-              <div className="ui-tech-bar w-full">
-                <div
-                  className="ui-tech-bar-fill"
-                  style={{ width: `${Math.min(percent, 100)}%` }}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function App() {
   const [language, setLanguage] = useState<Language>(() => {
     const saved = localStorage.getItem("edgebutler-language");
@@ -809,7 +748,7 @@ export default function App() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 selection:bg-cyan-500/30 overflow-x-hidden pb-32">
+    <main className="min-h-screen bg-slate-950 text-slate-100 selection:bg-cyan-500/30 overflow-x-hidden pb-32 group/layout">
       {/* Sci-Fi Scanline Effect */}
       <div className="ui-scanline" />
 
@@ -822,13 +761,13 @@ export default function App() {
       <input
         type="checkbox"
         id="sidebar-toggle"
-        className="peer/sidebar hidden"
+        className="hidden"
         defaultChecked={false}
       />
 
       <div className="flex min-h-screen relative">
         {/* Sidebar */}
-        <aside className="fixed left-0 top-0 bottom-0 z-50 w-64 peer-checked/sidebar:w-20 bg-slate-900/80 backdrop-blur-2xl border-r border-cyan-500/10 transition-all duration-300 group/sidebar overflow-hidden flex flex-col ui-bg-scanline">
+        <aside className="fixed left-0 top-0 bottom-0 z-50 w-64 group-has-[#sidebar-toggle:checked]/layout:w-20 bg-slate-900/80 backdrop-blur-2xl border-r border-cyan-500/10 transition-all duration-300 group/sidebar overflow-hidden flex flex-col ui-bg-scanline">
           <div className="flex items-center gap-4 p-6 mb-4">
             <label
               htmlFor="sidebar-toggle"
@@ -841,12 +780,12 @@ export default function App() {
                 </span>
               </div>
             </label>
-            <span className="text-xl font-black tracking-tight uppercase transition-opacity duration-300 peer-checked/sidebar:opacity-0 group-hover/sidebar:peer-checked/sidebar:opacity-100 whitespace-nowrap">
+            <span className="text-xl font-black tracking-tight uppercase transition-opacity duration-300 group-has-[#sidebar-toggle:checked]/layout:opacity-0 group-hover/sidebar:group-has-[#sidebar-toggle:checked]/layout:opacity-100 whitespace-nowrap">
               Butler
             </span>
           </div>
 
-          <nav className="flex-1 px-3 space-y-2">
+          <nav className="flex-1 px-3 space-y-2 no-scrollbar">
             {[
               { href: "#fleet", label: t.fleet, icon: HardDrives },
               { href: "#install", label: t.addVps, icon: SelectionPlus },
@@ -863,7 +802,7 @@ export default function App() {
                 className="group flex items-center gap-4 px-4 py-3 text-sm font-bold text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/5 rounded-xl transition-all border-l-2 border-transparent hover:border-cyan-400/50"
               >
                 <item.icon size={22} className="shrink-0" />
-                <span className="transition-all duration-300 peer-checked/sidebar:opacity-0 group-hover/sidebar:peer-checked/sidebar:opacity-100 whitespace-nowrap">
+                <span className="transition-all duration-300 group-has-[#sidebar-toggle:checked]/layout:opacity-0 group-hover/sidebar:group-has-[#sidebar-toggle:checked]/layout:opacity-100 whitespace-nowrap">
                   {item.label}
                 </span>
               </a>
@@ -876,7 +815,7 @@ export default function App() {
               onClick={logout}
             >
               <SignOut size={22} className="shrink-0" />
-              <span className="transition-all duration-300 peer-checked/sidebar:opacity-0 group-hover/sidebar:peer-checked/sidebar:opacity-100 whitespace-nowrap">
+              <span className="transition-all duration-300 group-has-[#sidebar-toggle:checked]/layout:opacity-0 group-hover/sidebar:group-has-[#sidebar-toggle:checked]/layout:opacity-100 whitespace-nowrap">
                 {t.signOut}
               </span>
             </button>
@@ -884,7 +823,7 @@ export default function App() {
         </aside>
 
         {/* Main Content Area */}
-        <div className="flex-1 ml-64 peer-checked/sidebar:ml-20 transition-all duration-300 min-w-0">
+        <div className="flex-1 ml-64 group-has-[#sidebar-toggle:checked]/layout:ml-20 transition-all duration-300 min-w-0">
           <div className="shell py-8 px-8 space-y-12">
             <header className="flex flex-col md:flex-row items-start md:items-center justify-between bg-slate-900/40 backdrop-blur-xl border border-white/5 p-8 rounded-[2.5rem] shadow-2xl gap-6 relative overflow-hidden group ui-corner-brackets ui-bg-scanline">
               <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/5 blur-3xl rounded-full -mr-20 -mt-20 group-hover:bg-cyan-500/10 transition-colors" />
@@ -918,11 +857,7 @@ export default function App() {
 
               <div className="flex items-center gap-4 w-full md:w-auto relative z-10">
                 <div className="flex items-center gap-1 p-1.5 bg-black/40 backdrop-blur border border-white/10 rounded-2xl flex-1 md:flex-initial">
-                  <Translate
-                    size={14}
-                    className="text-slate-500 ml-2 mr-1"
-                    weight="bold"
-                  />
+                  <Translate size={14} className="text-slate-500 ml-2 mr-1" />
                   <button
                     className={`flex-1 md:flex-initial px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${language === "zh" ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/20" : "text-slate-500 hover:text-slate-200"}`}
                     onClick={() => changeLanguage("zh")}
@@ -1009,27 +944,24 @@ export default function App() {
 
             <div className="section-divider" />
 
-            {/* VPS Cluster - Horizontal Scroll */}
-            <section className="space-y-6 animate-stagger-2" id="fleet">
-              <div className="flex items-end justify-between px-2">
+            {/* VPS Cluster - Bar Style */}
+            <section className="space-y-4 animate-stagger-2" id="fleet">
+              <div className="flex items-center justify-between px-2 mb-6">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <HardDrives
-                      size={16}
-                      className="text-cyan-500"
-                      weight="bold"
-                    />
+                    <HardDrives size={18} className="text-cyan-500" />
                     <h2 className="text-2xl font-black tracking-tight">
                       {t.fleet}
                     </h2>
+                    <span className="ui-hud-tag ml-2">[ACTIVE_NODES]</span>
                   </div>
-                  <p className="text-xs font-medium text-slate-500 uppercase tracking-widest">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                     {t.fleetHelp}
                   </p>
                 </div>
                 <div className="flex gap-3">
                   <button
-                    className="flex items-center gap-2 px-6 py-2.5 text-xs font-black uppercase tracking-widest bg-white/5 border border-white/10 rounded-2xl text-slate-400 hover:text-white hover:bg-cyan-500/10 hover:border-cyan-500/30 transition-all shadow-lg"
+                    className="flex items-center gap-2 px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:text-white hover:bg-cyan-500/10 hover:border-cyan-500/30 transition-all"
                     disabled={loading}
                     onClick={reload}
                   >
@@ -1037,7 +969,7 @@ export default function App() {
                     {t.reload}
                   </button>
                   <button
-                    className="flex items-center gap-2 px-6 py-2.5 text-xs font-black uppercase tracking-widest bg-cyan-500/10 border border-cyan-500/20 rounded-2xl text-cyan-400 hover:text-white hover:bg-cyan-500 hover:border-cyan-500 transition-all shadow-cyan-500/10 shadow-lg"
+                    className="flex items-center gap-2 px-4 py-2 text-[10px] font-black uppercase tracking-widest bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400 hover:text-white hover:bg-cyan-500 hover:border-cyan-500 transition-all"
                     disabled={loading}
                     onClick={refreshAll}
                   >
@@ -1055,10 +987,10 @@ export default function App() {
                   </p>
                 </div>
               ) : (
-                <div className="flex flex-row overflow-x-auto gap-8 pb-8 custom-scrollbar snap-x snap-mandatory px-2 -mx-2">
+                <div className="space-y-3">
                   {servers.map((server) => (
                     <article
-                      className="min-w-[380px] w-[400px] shrink-0 snap-start bg-slate-900/60 backdrop-blur-md border border-white/5 p-8 rounded-[2.5rem] shadow-2xl transition-all hover:border-cyan-500/40 hover:-translate-y-2 group relative overflow-hidden ui-corner-brackets"
+                      className="w-full bg-slate-900/60 backdrop-blur-md border border-white/5 p-4 pl-6 rounded-2xl shadow-xl transition-all hover:border-cyan-500/40 hover:bg-slate-900/80 group relative overflow-hidden ui-corner-brackets flex flex-col lg:flex-row items-center gap-6"
                       key={server.id}
                     >
                       <div className="ui-sweep-effect" />
@@ -1068,96 +1000,122 @@ export default function App() {
                       {loading && (
                         <>
                           <div className="ui-skeleton-overlay" />
-                          <div className="absolute inset-0 z-30 flex items-center justify-center">
-                            <span className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.4em] animate-pulse">
-                              Scanning_Node_Data...
-                            </span>
-                          </div>
                         </>
                       )}
 
-                      <div className="flex items-start justify-between mb-6 relative z-20">
-                        <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-6 flex-1 min-w-0 relative z-20">
+                        <StatusPill
+                          status={server.status}
+                          language={language}
+                        />
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="ui-hud-tag">[AUTH_V2]</span>
                             <span className="ui-hud-tag">[IP_STR_ENC]</span>
                           </div>
-                          <h3 className="text-xl font-black tracking-tight text-white truncate group-hover:text-cyan-400 transition-colors">
+                          <h3 className="text-base font-black tracking-tight text-white truncate group-hover:text-cyan-400 transition-colors">
                             {server.name}
                           </h3>
                           <p className="text-[10px] font-black text-cyan-500/40 font-mono tracking-wider truncate uppercase">
                             {server.host}
                           </p>
                         </div>
-                        <StatusPill
-                          status={server.status}
-                          language={language}
-                        />
+
+                        <div className="hidden xl:flex flex-1 items-center gap-4">
+                          {[
+                            {
+                              label: "Memory",
+                              value: server.lastSnapshot?.memory
+                            },
+                            { label: "Disk", value: server.lastSnapshot?.disk },
+                            { label: "Load", value: server.lastSnapshot?.load }
+                          ].map((item) => {
+                            let percent = 0;
+                            if (
+                              item.value &&
+                              (item.label === "Memory" || item.label === "Disk")
+                            ) {
+                              const match = item.value.match(/(\d+)%/);
+                              if (match) {
+                                percent = parseInt(match[1]);
+                              } else if (item.label === "Memory") {
+                                const parts =
+                                  item.value.match(/(\d+)\/(\d+)\s*MB/);
+                                if (parts)
+                                  percent =
+                                    (parseInt(parts[1]) / parseInt(parts[2])) *
+                                    100;
+                              }
+                            }
+
+                            return (
+                              <div
+                                key={item.label}
+                                className="flex-1 bg-white/5 border border-white/5 rounded-lg px-3 py-1.5 min-w-[100px] ui-bg-scanline relative overflow-hidden"
+                              >
+                                <dt className="text-[8px] uppercase tracking-widest text-slate-500 font-black mb-0.5">
+                                  {item.label}
+                                </dt>
+                                <dd className="text-slate-300 text-[10px] font-bold truncate relative z-10">
+                                  {item.value || "-"}
+                                </dd>
+                                {percent > 0 && (
+                                  <div className="ui-tech-bar w-full mt-1.5 opacity-60">
+                                    <div
+                                      className="ui-tech-bar-fill"
+                                      style={{
+                                        width: `${Math.min(percent, 100)}%`
+                                      }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
 
-                      <div className="relative z-20">
-                        <Snapshot
-                          snapshot={server.lastSnapshot}
-                          language={language}
-                        />
-                      </div>
-
-                      <div className="mt-8 pt-8 border-t border-white/5 flex flex-wrap items-center gap-x-6 gap-y-3 text-[10px] font-black text-slate-500 uppercase tracking-[0.15em] relative z-20">
-                        <span className="flex items-center gap-1.5">
-                          <IdentificationCard
-                            size={14}
-                            weight="bold"
-                            className="text-cyan-500/50"
-                          />{" "}
-                          ID:{" "}
-                          <span className="text-slate-300 font-mono">
+                      <div className="flex items-center gap-6 relative z-20 shrink-0">
+                        <div className="hidden md:flex flex-col items-end text-[9px] font-black text-slate-500 uppercase tracking-wider">
+                          <span className="flex items-center gap-1.5">
+                            <IdentificationCard
+                              size={12}
+                              className="text-cyan-500/50"
+                            />{" "}
                             {server.id.slice(-8)}
                           </span>
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <MapPin
-                            size={14}
-                            weight="bold"
-                            className="text-cyan-500/50"
-                          />{" "}
-                          {t.location}:{" "}
-                          <span className="text-slate-300">
+                          <span className="flex items-center gap-1.5">
+                            <MapPin size={12} className="text-cyan-500/50" />{" "}
                             {server.location}
                           </span>
-                        </span>
-                      </div>
+                        </div>
 
-                      <div className="mt-8 grid grid-cols-3 gap-3 opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0 relative z-20">
-                        <button
-                          className="flex flex-col items-center justify-center gap-2 p-3 bg-white/5 hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-400 border border-white/5 hover:border-cyan-500/40 rounded-2xl transition-all"
-                          disabled={loading}
-                          onClick={() => refreshServer(server.id)}
-                        >
-                          <RocketLaunch size={20} />
-                          <span className="text-[9px] font-black uppercase tracking-tighter">
-                            {t.refreshOne}
-                          </span>
-                        </button>
-                        <button
-                          className="flex flex-col items-center justify-center gap-2 p-3 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 hover:border-white/20 rounded-2xl transition-all"
-                          disabled={loading}
-                          onClick={() => editServer(server)}
-                        >
-                          <IdentificationCard size={20} />
-                          <span className="text-[9px] font-black uppercase tracking-tighter">
-                            {t.edit}
-                          </span>
-                        </button>
-                        <button
-                          className="flex flex-col items-center justify-center gap-2 p-3 bg-white/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-white/5 hover:border-rose-500/40 rounded-2xl transition-all"
-                          disabled={loading}
-                          onClick={() => deleteServer(server)}
-                        >
-                          <Trash size={20} />
-                          <span className="text-[9px] font-black uppercase tracking-tighter">
-                            {t.delete}
-                          </span>
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            className="p-2 bg-white/5 hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-400 border border-white/5 rounded-xl transition-all"
+                            disabled={loading}
+                            onClick={() => refreshServer(server.id)}
+                            title={t.refreshOne}
+                          >
+                            <RocketLaunch size={18} />
+                          </button>
+                          <button
+                            className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 rounded-xl transition-all"
+                            disabled={loading}
+                            onClick={() => editServer(server)}
+                            title={t.edit}
+                          >
+                            <IdentificationCard size={18} />
+                          </button>
+                          <button
+                            className="p-2 bg-white/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-white/5 rounded-xl transition-all"
+                            disabled={loading}
+                            onClick={() => deleteServer(server)}
+                            title={t.delete}
+                          >
+                            <Trash size={18} />
+                          </button>
+                        </div>
                       </div>
                     </article>
                   ))}
@@ -1167,64 +1125,70 @@ export default function App() {
 
             <div className="section-divider" />
 
-            <section className="grid grid-cols-1 lg:grid-cols-2 gap-12 animate-stagger-3 items-start">
-              {/* New VPS Form */}
+            <section className="space-y-6 animate-stagger-3">
+              {/* New VPS Form - Bar Style */}
               <div
-                className="ui-glass-tech p-10 rounded-[3rem] shadow-2xl space-y-8 ui-corner-brackets"
+                className="ui-glass-tech p-8 rounded-[2rem] shadow-2xl space-y-6 ui-corner-brackets"
                 id="install"
               >
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-cyan-500/10 rounded-2xl text-cyan-400">
-                    <SelectionPlus size={24} />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="p-2.5 bg-cyan-500/10 rounded-xl text-cyan-400">
+                      <SelectionPlus size={20} />
+                    </div>
+                    <div className="space-y-0.5">
+                      <h2 className="text-xl font-black tracking-tight text-white">
+                        {t.addVps}
+                      </h2>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                        {t.addVpsHelp}
+                      </p>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <h2 className="text-2xl font-black tracking-tight text-white">
-                      {t.addVps}
-                    </h2>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                      {t.addVpsHelp}
-                    </p>
-                  </div>
+                  <button
+                    disabled={loading}
+                    onClick={createInstallToken}
+                    className="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/20 font-black px-6 py-2.5 rounded-xl transition-all text-[10px] uppercase tracking-widest shadow-lg shadow-cyan-900/10"
+                  >
+                    {t.generateInstall}
+                  </button>
                 </div>
 
-                <div className="space-y-6">
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-3">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-1">
-                        {t.customName}
-                      </label>
-                      <input
-                        value={installForm.name}
-                        onChange={(event) =>
-                          setInstallForm((current) => ({
-                            ...current,
-                            name: event.target.value
-                          }))
-                        }
-                        className="w-full bg-black/40 border border-white/5 rounded-2xl px-5 py-4 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
-                        placeholder="HK-PROX-01"
-                      />
-                    </div>
-                    <div className="space-y-3">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-1">
-                        {t.username}
-                      </label>
-                      <input
-                        value={installForm.username}
-                        onChange={(event) =>
-                          setInstallForm((current) => ({
-                            ...current,
-                            username: event.target.value
-                          }))
-                        }
-                        className="w-full bg-black/40 border border-white/5 rounded-2xl px-5 py-4 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
-                        placeholder="root"
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-black/20 p-6 rounded-2xl border border-white/5">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
+                      {t.customName}
+                    </label>
+                    <input
+                      value={installForm.name}
+                      onChange={(event) =>
+                        setInstallForm((current) => ({
+                          ...current,
+                          name: event.target.value
+                        }))
+                      }
+                      className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                      placeholder="PROX_NODE"
+                    />
                   </div>
-
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-1">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
+                      {t.username}
+                    </label>
+                    <input
+                      value={installForm.username}
+                      onChange={(event) =>
+                        setInstallForm((current) => ({
+                          ...current,
+                          username: event.target.value
+                        }))
+                      }
+                      className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                      placeholder="root"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
                       {t.location}
                     </label>
                     <input
@@ -1235,151 +1199,151 @@ export default function App() {
                           location: event.target.value
                         }))
                       }
-                      className="w-full bg-black/40 border border-white/5 rounded-2xl px-5 py-4 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
-                      placeholder="TOKYO-DC-01"
+                      className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                      placeholder="GLOBAL"
                     />
                   </div>
+                </div>
 
-                  <button
-                    disabled={loading}
-                    onClick={createInstallToken}
-                    className="w-full bg-gradient-to-r from-cyan-600 to-blue-700 hover:from-cyan-500 hover:to-blue-600 text-white font-black py-5 rounded-[1.5rem] shadow-xl shadow-cyan-950/20 transition-all transform active:scale-[0.98] uppercase tracking-[0.2em] text-xs"
-                  >
-                    {t.generateInstall}
-                  </button>
-
-                  {installToken && (
-                    <div className="bg-black/60 border border-cyan-500/20 rounded-3xl p-6 space-y-4 animate-in zoom-in-95 duration-300">
-                      <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 border-b border-white/5 pb-4">
-                        <span className="flex items-center gap-2">
-                          <Clock size={14} className="text-amber-500" />{" "}
-                          {t.expires}
-                        </span>
-                        <span className="text-amber-400">
-                          {formatDate(installToken.expiresAt, language)}
-                        </span>
-                      </div>
-                      <pre className="text-xs font-mono text-cyan-400 overflow-x-auto p-2 leading-relaxed custom-scrollbar selection:bg-cyan-500 selection:text-black">
-                        {installToken.installCommand}
-                      </pre>
+                {installToken && (
+                  <div className="bg-black/60 border border-cyan-500/20 rounded-2xl p-5 space-y-3 animate-in zoom-in-95 duration-300">
+                    <div className="flex justify-between items-center text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-white/5 pb-3">
+                      <span className="flex items-center gap-2">
+                        <Clock size={12} className="text-amber-500" />{" "}
+                        {t.expires}
+                      </span>
+                      <span className="text-amber-400">
+                        {formatDate(installToken.expiresAt, language)}
+                      </span>
                     </div>
-                  )}
-
-                  <div className="pt-8 border-t border-white/5 space-y-6">
-                    <div className="space-y-3">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-1">
-                        {t.agentEndpoint}
-                      </label>
-                      <input
-                        value={agentEndpoint}
-                        onChange={(event) =>
-                          setAgentEndpoint(event.target.value)
-                        }
-                        className="w-full bg-black/20 border border-white/5 rounded-2xl px-5 py-4 text-xs font-mono text-slate-400 focus:border-cyan-500/50 transition-all outline-none"
-                        placeholder="https://eb-controller.workers.dev"
-                      />
-                    </div>
-                    <button
-                      className="w-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white font-black py-4 rounded-2xl border border-white/5 transition-all text-[10px] uppercase tracking-[0.3em]"
-                      disabled={loading || !agentEndpoint.trim()}
-                      onClick={createEndpointUpdate}
-                    >
-                      {t.updateAgentEndpoint}
-                    </button>
+                    <pre className="text-[10px] font-mono text-cyan-400 overflow-x-auto p-1 leading-relaxed no-scrollbar">
+                      {installToken.installCommand}
+                    </pre>
                   </div>
+                )}
+
+                <div className="flex flex-col md:flex-row items-end gap-6 pt-4">
+                  <div className="flex-1 space-y-2 w-full">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
+                      {t.agentEndpoint}
+                    </label>
+                    <input
+                      value={agentEndpoint}
+                      onChange={(event) => setAgentEndpoint(event.target.value)}
+                      className="w-full bg-black/20 border border-white/5 rounded-xl px-4 py-2.5 text-[10px] font-mono text-slate-400 focus:border-cyan-500/50 transition-all outline-none"
+                      placeholder="https://eb-controller.workers.dev"
+                    />
+                  </div>
+                  <button
+                    className="w-full md:w-auto px-8 py-3 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white font-black rounded-xl border border-white/5 transition-all text-[10px] uppercase tracking-widest"
+                    disabled={loading || !agentEndpoint.trim()}
+                    onClick={createEndpointUpdate}
+                  >
+                    {t.updateAgentEndpoint}
+                  </button>
                 </div>
               </div>
 
-              {/* Rules Form */}
-              <div className="ui-glass-tech p-10 rounded-[3rem] shadow-2xl space-y-8 ui-corner-brackets">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-500/10 rounded-2xl text-blue-400">
-                    <FileMagnifyingGlass size={24} />
+              {/* Rules Form - Bar Style */}
+              <div className="ui-glass-tech p-8 rounded-[2rem] shadow-2xl space-y-6 ui-corner-brackets">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400">
+                      <FileMagnifyingGlass size={20} />
+                    </div>
+                    <div className="space-y-0.5">
+                      <h2 className="text-xl font-black tracking-tight text-white">
+                        {t.aiRules}
+                      </h2>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                        {t.aiRulesHelp}
+                      </p>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <h2 className="text-2xl font-black tracking-tight text-white">
-                      {t.aiRules}
-                    </h2>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                      {t.aiRulesHelp}
-                    </p>
-                  </div>
+                  <button
+                    disabled={loading}
+                    onClick={saveRules}
+                    className="bg-white/5 hover:bg-white/10 text-slate-300 font-black px-8 py-2.5 rounded-xl border border-white/10 transition-all text-[10px] uppercase tracking-widest"
+                  >
+                    {t.saveRules}
+                  </button>
                 </div>
                 <textarea
                   value={rules}
                   onChange={(event) => setRules(event.target.value)}
-                  className="w-full bg-black/40 border border-white/5 rounded-[2rem] p-6 text-sm text-slate-300 placeholder:text-slate-700 focus:border-cyan-500/50 transition-all outline-none resize-none min-h-[280px] leading-relaxed custom-scrollbar"
+                  className="w-full bg-black/40 border border-white/5 rounded-2xl p-5 text-sm text-slate-300 placeholder:text-slate-700 focus:border-cyan-500/50 transition-all outline-none resize-none min-h-[120px] leading-relaxed custom-scrollbar"
                   placeholder="System protocol constraints..."
                 />
-                <button
-                  disabled={loading}
-                  onClick={saveRules}
-                  className="w-full bg-white/5 hover:bg-white/10 text-slate-300 font-black py-4 rounded-2xl border border-white/10 transition-all text-xs uppercase tracking-[0.2em]"
-                >
-                  {t.saveRules}
-                </button>
               </div>
             </section>
 
             <div className="section-divider" />
 
-            {/* Pending Confirmations Section */}
+            {/* Pending Confirmations Section - Bar Style */}
             {pendingOperations.length > 0 && (
-              <section className="bg-rose-500/5 border border-rose-500/20 p-10 rounded-[3rem] shadow-2xl space-y-8 relative overflow-hidden animate-in fade-in zoom-in duration-500">
+              <section className="bg-rose-500/5 border border-rose-500/20 p-8 rounded-[2.5rem] shadow-2xl space-y-6 relative overflow-hidden animate-in fade-in zoom-in duration-500 ui-corner-brackets">
                 <div className="absolute top-0 right-0 p-8 opacity-10">
-                  <WarningCircle
-                    size={120}
-                    weight="fill"
-                    className="text-rose-500"
-                  />
+                  <WarningCircle size={80} />
                 </div>
                 <div className="flex items-center gap-4 relative z-10">
-                  <div className="p-3 bg-rose-500/20 rounded-2xl text-rose-400 animate-pulse">
-                    <WarningCircle size={24} />
+                  <div className="p-2.5 bg-rose-500/20 rounded-xl text-rose-400 animate-pulse">
+                    <WarningCircle size={20} />
                   </div>
-                  <div className="space-y-1">
-                    <h2 className="text-2xl font-black tracking-tight text-rose-400 uppercase tracking-[0.1em]">
+                  <div className="space-y-0.5">
+                    <h2 className="text-xl font-black tracking-tight text-rose-400 uppercase tracking-[0.1em]">
                       {t.pendingTitle}
                     </h2>
-                    <p className="text-[10px] font-black text-rose-500/70 uppercase tracking-widest">
+                    <p className="text-[9px] font-black text-rose-500/70 uppercase tracking-widest">
                       {t.pendingHelp}
                     </p>
                   </div>
                 </div>
-                <div className="grid gap-6 relative z-10">
+                <div className="grid gap-3 relative z-10">
                   {pendingOperations.map((operation) => (
                     <div
-                      className="flex items-center justify-between p-8 bg-rose-500/10 backdrop-blur border border-rose-500/20 rounded-[2rem] transition-all hover:bg-rose-500/20 group"
+                      className="flex items-center justify-between p-6 bg-rose-500/10 backdrop-blur border border-rose-500/20 rounded-2xl transition-all hover:bg-rose-500/15 group"
                       key={operation.id}
                     >
-                      <div className="space-y-2">
-                        <strong className="text-xl font-black tracking-tight text-rose-400 uppercase group-hover:text-rose-300 transition-colors">
-                          {operation.action}
-                        </strong>
-                        <div className="flex items-center gap-3">
-                          <span className="px-2 py-0.5 rounded bg-black/40 text-[9px] font-bold text-slate-300 uppercase tracking-wider">
-                            {operation.serverName}
-                          </span>
-                          <span className="font-mono text-xs text-slate-400 opacity-60">
-                            / {operation.command || operation.target || "NULL"}
-                          </span>
+                      <div className="flex items-center gap-6 flex-1 min-w-0">
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <strong className="text-base font-black tracking-tight text-rose-400 uppercase group-hover:text-rose-300 transition-colors">
+                              {operation.action}
+                            </strong>
+                            <span className="ui-hud-tag">[LEASE_SEC]</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="px-1.5 py-0.5 rounded bg-black/40 text-[8px] font-black text-slate-400 uppercase tracking-wider">
+                              {operation.serverName}
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-500 opacity-60 truncate">
+                              /{" "}
+                              {operation.command || operation.target || "NULL"}
+                            </span>
+                          </div>
                         </div>
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] pt-2">
-                          <Clock size={12} className="inline mr-1" />{" "}
-                          SECURITY_LEASE_EXPIRES:{" "}
-                          {formatDate(operation.expiresAt, language)}
-                        </p>
+
+                        <div className="hidden xl:flex flex-1 justify-end">
+                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">
+                            <Clock size={12} className="inline mr-2" />{" "}
+                            SECURITY_LEASE_EXPIRES:{" "}
+                            <span className="text-rose-400/80">
+                              {formatDate(operation.expiresAt, language)}
+                            </span>
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex gap-4">
+
+                      <div className="flex gap-3 shrink-0 ml-6">
                         <button
-                          className="px-8 py-3 bg-rose-500 hover:bg-rose-400 text-white text-xs font-black uppercase tracking-[0.2em] rounded-2xl shadow-xl shadow-rose-950/40 transition-all active:scale-95"
+                          className="px-6 py-2 bg-rose-500 hover:bg-rose-400 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg shadow-rose-950/40 transition-all active:scale-95"
                           disabled={loading}
                           onClick={() => confirmOperation(operation.id)}
                         >
                           {t.confirm}
                         </button>
                         <button
-                          className="px-8 py-3 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 rounded-2xl text-xs font-black uppercase tracking-[0.2em] transition-all active:scale-95"
+                          className="px-6 py-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95"
                           disabled={loading}
                           onClick={() => cancelOperation(operation.id)}
                         >
@@ -1396,26 +1360,44 @@ export default function App() {
 
             {/* Notification Channels */}
             <section
-              className="ui-glass-tech p-10 rounded-[3.5rem] shadow-2xl space-y-12 ui-corner-brackets"
+              className="ui-glass-tech p-8 rounded-[2.5rem] shadow-2xl space-y-8 ui-corner-brackets"
               id="notifications"
             >
-              <div className="flex items-center gap-4">
-                <div className="p-3 bg-purple-500/10 rounded-2xl text-purple-400">
-                  <BellRinging size={24} />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-2.5 bg-purple-500/10 rounded-xl text-purple-400">
+                    <BellRinging size={20} />
+                  </div>
+                  <div className="space-y-0.5">
+                    <h2 className="text-xl font-black tracking-tight text-white">
+                      {t.notificationTitle}
+                    </h2>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                      {t.notificationHelp}
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <h2 className="text-3xl font-black tracking-tighter text-white">
-                    {t.notificationTitle}
-                  </h2>
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em]">
-                    {t.notificationHelp}
-                  </p>
+                <div className="flex gap-2">
+                  <button
+                    disabled={loading || !notificationForm.name.trim()}
+                    onClick={saveNotification}
+                    className="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 font-black px-6 py-2.5 rounded-xl border border-cyan-500/20 transition-all text-[10px] uppercase tracking-widest"
+                  >
+                    {t.saveChannel}
+                  </button>
+                  <button
+                    disabled={loading || !notificationForm.name.trim()}
+                    onClick={saveAndTestNotification}
+                    className="bg-white/5 hover:bg-white/10 text-slate-300 font-black px-6 py-2.5 rounded-xl border border-white/10 transition-all text-[10px] uppercase tracking-widest"
+                  >
+                    {t.saveAndTest}
+                  </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8 items-end bg-black/20 p-8 rounded-[2.5rem] border border-white/5">
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 bg-black/20 p-6 rounded-2xl border border-white/5">
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
                     {t.name}
                   </label>
                   <input
@@ -1426,12 +1408,12 @@ export default function App() {
                         name: event.target.value
                       }))
                     }
-                    className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-4 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                    className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
                     placeholder="ALERT_GATEWAY"
                   />
                 </div>
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
                     {t.type}
                   </label>
                   <div className="relative">
@@ -1444,7 +1426,7 @@ export default function App() {
                             .value as NotificationChannel["type"]
                         }))
                       }
-                      className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-4 text-sm text-white focus:border-cyan-500/50 transition-all outline-none appearance-none cursor-pointer"
+                      className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none appearance-none cursor-pointer"
                     >
                       <option value="wecom" className="bg-slate-900">
                         Enterprise WeChat
@@ -1456,15 +1438,15 @@ export default function App() {
                         Generic webhook
                       </option>
                     </select>
-                    <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none opacity-40">
-                      <TerminalWindow size={16} />
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-40">
+                      <TerminalWindow size={14} />
                     </div>
                   </div>
                 </div>
 
                 {notificationForm.type !== "telegram" ? (
-                  <div className="space-y-3 xl:col-span-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
+                  <div className="space-y-2 lg:col-span-2">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
                       {t.webhookUrl}
                     </label>
                     <input
@@ -1475,14 +1457,14 @@ export default function App() {
                           url: event.target.value
                         }))
                       }
-                      className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-4 text-xs font-mono text-slate-400 focus:border-cyan-500/50 transition-all outline-none"
+                      className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-[10px] font-mono text-slate-400 focus:border-cyan-500/50 transition-all outline-none"
                       placeholder="https://endpoint.internal/..."
                     />
                   </div>
                 ) : (
                   <>
-                    <div className="space-y-3">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
                         {t.botToken}
                       </label>
                       <input
@@ -1494,12 +1476,12 @@ export default function App() {
                             botToken: event.target.value
                           }))
                         }
-                        className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-4 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
-                        placeholder="TOKEN_ID"
+                        className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                        placeholder="TOKEN"
                       />
                     </div>
-                    <div className="space-y-3">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1">
                         {t.chatId}
                       </label>
                       <input
@@ -1510,55 +1492,48 @@ export default function App() {
                             chatId: event.target.value
                           }))
                         }
-                        className="w-full bg-white/5 border border-white/5 rounded-2xl px-5 py-4 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
-                        placeholder="SECURE_CHAT_ID"
+                        className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                        placeholder="CHAT_ID"
                       />
                     </div>
                   </>
                 )}
               </div>
 
-              <div className="flex gap-4 max-w-2xl mx-auto">
-                <button
-                  disabled={loading || !notificationForm.name.trim()}
-                  onClick={saveNotification}
-                  className="flex-1 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 font-black py-4 rounded-2xl border border-cyan-500/20 transition-all text-[10px] uppercase tracking-[0.3em]"
-                >
-                  {t.saveChannel}
-                </button>
-                <button
-                  disabled={loading || !notificationForm.name.trim()}
-                  onClick={saveAndTestNotification}
-                  className="flex-1 bg-white/5 hover:bg-white/10 text-slate-400 font-black py-4 rounded-2xl border border-white/10 transition-all text-[10px] uppercase tracking-[0.3em]"
-                >
-                  {t.saveAndTest}
-                </button>
-              </div>
-
               {notifications.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6">
+                <div className="space-y-3">
                   {notifications.map((channel) => (
                     <div
-                      className="p-6 bg-black/40 border border-white/5 rounded-[2rem] flex items-center justify-between group transition-all hover:border-cyan-500/30 shadow-xl"
+                      className="p-4 bg-black/40 border border-white/5 rounded-2xl flex items-center justify-between group transition-all hover:border-cyan-500/30 relative overflow-hidden ui-corner-brackets"
                       key={channel.id}
                     >
-                      <div className="space-y-1">
-                        <strong className="text-lg font-black tracking-tight text-white group-hover:text-cyan-400 transition-colors">
-                          {channel.name}
-                        </strong>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-2 py-0.5 bg-white/5 rounded-full">
-                            {channel.type}
-                          </span>
-                          {channel.type === "telegram" &&
-                            channel.telegramWebhookStatus && (
-                              <span className="text-[9px] font-black text-cyan-400/60 uppercase animate-pulse">
-                                ACTIVE
-                              </span>
-                            )}
+                      <div className="flex items-center gap-4 relative z-10">
+                        <div className="w-2 h-10 bg-cyan-500/10 rounded-full flex items-center justify-center">
+                          <div
+                            className={`w-1.5 h-1.5 rounded-full ${channel.enabled ? "bg-cyan-500 animate-pulse-neon" : "bg-slate-700"}`}
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <strong className="text-base font-black tracking-tight text-white group-hover:text-cyan-400 transition-colors">
+                              {channel.name}
+                            </strong>
+                            <span className="ui-hud-tag">[CH_SEC_READY]</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest px-1.5 py-0.5 bg-white/5 rounded-full">
+                              {channel.type}
+                            </span>
+                            {channel.type === "telegram" &&
+                              channel.telegramWebhookStatus && (
+                                <span className="text-[8px] font-black text-cyan-400/60 uppercase">
+                                  ACTIVE_HOOK
+                                </span>
+                              )}
+                          </div>
                         </div>
                       </div>
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all translate-x-4 group-hover:translate-x-0 duration-300">
+                      <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all translate-x-2 group-hover:translate-x-0 duration-300 relative z-10">
                         <button
                           className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-cyan-400 bg-white/5 hover:bg-cyan-500/10 border border-white/5 rounded-xl transition-all"
                           disabled={loading}
