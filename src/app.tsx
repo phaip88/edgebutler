@@ -97,6 +97,12 @@ type RulesResponse = {
   rules: string;
 };
 
+type GeneratedCommand = {
+  serverId: string;
+  serverName: string;
+  command: string;
+};
+
 type Language = "zh" | "en";
 
 const text = {
@@ -135,6 +141,12 @@ const text = {
     username: "Username",
     location: "Location",
     generateInstall: "Generate install command",
+    generateRestart: "Restart command",
+    restartCommandTitle: "Agent restart command",
+    restartCommandHelp:
+      "Use this command on a VPS that already has EdgeButler installed. It restarts the existing agent without re-registering the VPS.",
+    copyCommand: "Copy",
+    commandCopied: "Command copied.",
     expires: "Expires",
     aiOps: "AI Operations",
     aiOpsHelp:
@@ -203,6 +215,12 @@ const text = {
     username: "用户名",
     location: "位置",
     generateInstall: "生成安装命令",
+    generateRestart: "生成重启命令",
+    restartCommandTitle: "Agent 重启命令",
+    restartCommandHelp:
+      "用于已经安装 EdgeButler 的 VPS，仅重启现有 agent，不重新注册 VPS。",
+    copyCommand: "复制",
+    commandCopied: "命令已复制。",
     expires: "过期时间",
     aiOps: "AI 运维",
     aiOpsHelp: "输入诊断或运维指令。变更操作必须在页面端二次确认。",
@@ -320,6 +338,8 @@ export default function App() {
   const [installToken, setInstallToken] = useState<InstallTokenResponse | null>(
     null
   );
+  const [generatedCommand, setGeneratedCommand] =
+    useState<GeneratedCommand | null>(null);
   const [installForm, setInstallForm] = useState({
     name: "",
     username: "root",
@@ -448,6 +468,33 @@ export default function App() {
       });
       setInstallToken(data);
       await reload();
+    });
+  }
+
+  function copyCommand(command: string) {
+    void withLoading(async () => {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(command);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = command;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+      setNotice(t.commandCopied);
+    });
+  }
+
+  function generateRestartCommand(server: ManagedServer) {
+    const origin = window.location.origin;
+    setGeneratedCommand({
+      serverId: server.id,
+      serverName: server.name,
+      command: `curl -fsSL '${origin}/restart-agent.sh' | sudo bash`
     });
   }
 
@@ -990,7 +1037,7 @@ export default function App() {
                 <div className="space-y-3">
                   {servers.map((server) => (
                     <article
-                      className="w-full bg-slate-900/60 backdrop-blur-md border border-white/5 p-4 pl-6 rounded-2xl shadow-xl transition-all hover:border-cyan-500/40 hover:bg-slate-900/80 group relative overflow-hidden ui-corner-brackets flex flex-col lg:flex-row items-center gap-6"
+                      className="w-full bg-slate-900/60 backdrop-blur-md border border-white/5 p-4 pl-6 rounded-2xl shadow-xl transition-all hover:border-cyan-500/40 hover:bg-slate-900/80 group relative overflow-hidden ui-corner-brackets flex flex-col lg:flex-row lg:flex-wrap items-center gap-6"
                       key={server.id}
                     >
                       <div className="ui-sweep-effect" />
@@ -1108,6 +1155,14 @@ export default function App() {
                             <IdentificationCard size={18} />
                           </button>
                           <button
+                            className="p-2 bg-white/5 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 border border-white/5 rounded-xl transition-all"
+                            disabled={loading}
+                            onClick={() => generateRestartCommand(server)}
+                            title={t.generateRestart}
+                          >
+                            <Clock size={18} />
+                          </button>
+                          <button
                             className="p-2 bg-white/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-white/5 rounded-xl transition-all"
                             disabled={loading}
                             onClick={() => deleteServer(server)}
@@ -1117,6 +1172,33 @@ export default function App() {
                           </button>
                         </div>
                       </div>
+                      {generatedCommand?.serverId === server.id && (
+                        <div className="relative z-20 w-full lg:basis-full bg-black/60 border border-amber-500/20 rounded-2xl p-5 space-y-3">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-white/5 pb-3">
+                            <div className="space-y-1">
+                              <span className="text-amber-300">
+                                {t.restartCommandTitle}:{" "}
+                                {generatedCommand.serverName}
+                              </span>
+                              <p className="text-slate-500 normal-case tracking-normal font-bold">
+                                {t.restartCommandHelp}
+                              </p>
+                            </div>
+                            <button
+                              className="self-start md:self-auto px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 rounded-xl transition-all"
+                              disabled={loading}
+                              onClick={() =>
+                                copyCommand(generatedCommand.command)
+                              }
+                            >
+                              {t.copyCommand}
+                            </button>
+                          </div>
+                          <pre className="text-[10px] font-mono text-amber-300 overflow-x-auto p-1 leading-relaxed no-scrollbar">
+                            {generatedCommand.command}
+                          </pre>
+                        </div>
+                      )}
                     </article>
                   ))}
                 </div>
@@ -1219,6 +1301,13 @@ export default function App() {
                     <pre className="text-[10px] font-mono text-cyan-400 overflow-x-auto p-1 leading-relaxed no-scrollbar">
                       {installToken.installCommand}
                     </pre>
+                    <button
+                      className="px-4 py-2 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                      disabled={loading}
+                      onClick={() => copyCommand(installToken.installCommand)}
+                    >
+                      {t.copyCommand}
+                    </button>
                   </div>
                 )}
 
