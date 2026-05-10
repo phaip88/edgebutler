@@ -21,6 +21,7 @@
       "/agents/*",
       "/api/*",
       "/install.sh",
+      "/restart-agent.sh",
       "/oauth/*",
       "/telegram",
       "/telegram/*"
