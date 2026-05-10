@@ -31,6 +31,8 @@ ACTIONS = {
     "check_docker": "docker ps",
     "check_logs": "journalctl -n 80 --no-pager",
     "check_top_processes": "ps aux --sort=-%cpu | head -n 15",
+    "check_command": "printf 'Command path:\\n'; command -v '{target}' || true; printf '\\nMatching files:\\n'; find /usr/local/bin /usr/bin /bin /opt /etc/systemd/system -maxdepth 5 -iname '*{target}*' 2>/dev/null | head -n 100; printf '\\nPackage matches:\\n'; (dpkg -l 2>/dev/null || rpm -qa 2>/dev/null || true) | grep -i '{target}' || true",
+    "find_file": "printf 'Command path:\\n'; command -v '{target}' || true; printf '\\nFile matches:\\n'; find /usr/local/bin /usr/bin /bin /sbin /usr/sbin /opt /etc/systemd/system -maxdepth 6 -iname '*{target}*' 2>/dev/null | head -n 100",
     "process_list": "ps -eo pid,ppid,user,stat,pcpu,pmem,etime,comm,args --sort=-pcpu | head -n 100",
     "analyze_processes": "printf 'Top CPU/memory processes:\\n'; ps -eo pid,ppid,user,stat,pcpu,pmem,etime,comm,args --sort=-pcpu | head -n 40; printf '\\nRunning services:\\n'; systemctl list-units --type=service --state=running --no-pager 2>/dev/null | head -n 80 || true; printf '\\nListening ports:\\n'; ss -lntup 2>/dev/null | head -n 80 || true",
     "check_port": "ss -lntp | grep '{target}'",
