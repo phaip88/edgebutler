@@ -1,4 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  TerminalWindow,
+  SelectionPlus,
+  BellRinging,
+  FileMagnifyingGlass,
+  HardDrives,
+  SignOut,
+  Translate,
+  Clock,
+  CheckCircle,
+  WarningCircle,
+  Monitor,
+  RocketLaunch,
+  IdentificationCard,
+  MapPin,
+  Trash
+} from "@phosphor-icons/react";
 
 type ServerSnapshot = {
   hostname?: string;
@@ -256,10 +273,30 @@ function StatusPill({
       offline: "offline",
       unknown: "unknown"
     },
-    zh: { pending: "待安装", online: "在线", offline: "离线", unknown: "未知" }
+    zh: {
+      pending: "待安装",
+      online: "运行中",
+      offline: "已离线",
+      unknown: "未知"
+    }
   };
+
+  const dotClass = {
+    online: "dot-online",
+    offline: "dot-offline",
+    pending: "dot-offline animate-pulse",
+    unknown: "dot-offline"
+  }[status];
+
   return (
-    <span className={`status status-${status}`}>
+    <span
+      className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+        status === "online"
+          ? "text-emerald-400 bg-emerald-400/10"
+          : "text-slate-400 bg-slate-400/10"
+      }`}
+    >
+      <span className={`dot ${dotClass}`} />
       {labels[language][status]}
     </span>
   );
@@ -273,7 +310,8 @@ function Snapshot({
   language: Language;
 }) {
   const t = text[language];
-  if (!snapshot) return <p className="muted">{t.noSnapshot}</p>;
+  if (!snapshot)
+    return <p className="text-slate-500 italic text-sm">{t.noSnapshot}</p>;
   const items = [
     ["Host", snapshot.hostname],
     ["OS", snapshot.os],
@@ -284,14 +322,21 @@ function Snapshot({
   ];
 
   return (
-    <dl className="snapshot">
+    <div className="grid grid-cols-2 gap-3 mt-4">
       {items.map(([label, value]) => (
-        <div key={label}>
-          <dt>{label}</dt>
-          <dd>{value || "-"}</dd>
+        <div
+          key={label}
+          className="bg-white/5 border border-white/5 rounded-xl p-3"
+        >
+          <dt className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">
+            {label}
+          </dt>
+          <dd className="text-slate-200 text-sm font-medium truncate">
+            {value || "-"}
+          </dd>
         </div>
       ))}
-    </dl>
+    </div>
   );
 }
 
@@ -633,140 +678,266 @@ export default function App() {
 
   if (!auth?.authenticated) {
     return (
-      <main className="shell auth-shell">
-        <div className="language-switch floating-switch">
-          <button
-            className={language === "zh" ? "active" : "secondary"}
-            onClick={() => changeLanguage("zh")}
-          >
-            中文
-          </button>
-          <button
-            className={language === "en" ? "active" : "secondary"}
-            onClick={() => changeLanguage("en")}
-          >
-            EN
-          </button>
-        </div>
-        <section className="hero auth-hero">
-          <div>
-            <p className="eyebrow">EdgeButler</p>
-            <h1>{t.loginTitle}</h1>
-            <p className="lead">{t.loginLead}</p>
+      <main className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="absolute top-6 right-6">
+          <div className="flex gap-1 p-1 bg-white/5 border border-white/10 rounded-xl">
+            <button
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${language === "zh" ? "bg-white/10 text-cyan-400" : "text-slate-400 hover:text-slate-100"}`}
+              onClick={() => changeLanguage("zh")}
+            >
+              中文
+            </button>
+            <button
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${language === "en" ? "bg-white/10 text-cyan-400" : "text-slate-400 hover:text-slate-100"}`}
+              onClick={() => changeLanguage("en")}
+            >
+              EN
+            </button>
           </div>
-        </section>
+        </div>
 
-        {error && <div className="alert">{error}</div>}
+        <div className="w-full max-w-lg space-y-6">
+          <section className="text-center space-y-2">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20 mb-4">
+              <span className="text-white text-2xl font-black tracking-tighter">
+                EB
+              </span>
+            </div>
+            <h1 className="text-4xl font-black tracking-tight text-white">
+              {t.loginTitle}
+            </h1>
+            <p className="text-slate-400 leading-relaxed">{t.loginLead}</p>
+          </section>
 
-        <section className="panel auth-panel">
-          {!auth?.authConfigured && <div className="alert">{t.noSecret}</div>}
-          <label>
-            {t.credential}
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") login();
-              }}
-              placeholder="ADMIN_PASSWORD or ADMIN_TOKEN"
-            />
-          </label>
-          <button disabled={loading || !password.trim()} onClick={login}>
-            {t.signIn}
-          </button>
-        </section>
+          {error && (
+            <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300">
+              {error}
+            </div>
+          )}
+
+          <section className="bg-slate-900/50 backdrop-blur-xl border border-white/10 p-8 rounded-3xl shadow-2xl space-y-6">
+            {!auth?.authConfigured && (
+              <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 p-3 rounded-lg text-xs font-medium">
+                {t.noSecret}
+              </div>
+            )}
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">
+                  {t.credential}
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-slate-600 focus:border-cyan-500/50 focus:ring-4 focus:ring-cyan-500/10 transition-all outline-none"
+                  onChange={(event) => setPassword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") login();
+                  }}
+                  placeholder="ADMIN_PASSWORD or ADMIN_TOKEN"
+                />
+              </div>
+              <button
+                disabled={loading || !password.trim()}
+                onClick={login}
+                className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold py-3 rounded-xl shadow-lg shadow-cyan-500/20 disabled:opacity-50 disabled:grayscale transition-all transform active:scale-[0.98]"
+              >
+                {loading ? "..." : t.signIn}
+              </button>
+            </div>
+          </section>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <div className="ops-layout">
-        <aside className="nav-rail">
-          <div className="brand-mark">EB</div>
-          <a href="#fleet">{t.fleet}</a>
-          <a href="#ai">{t.aiOps}</a>
-          <a href="#install">{t.addVps}</a>
-          <a href="#notifications">{t.notificationTitle}</a>
-          <a href="#audit">{t.audit}</a>
+    <main className="min-h-screen bg-slate-950 text-slate-100 selection:bg-cyan-500/30">
+      {/* Global Loading Bar */}
+      <div
+        className={`fixed top-0 left-0 right-0 h-1 bg-cyan-500 z-50 transition-transform duration-500 origin-left ${loading ? "scale-x-100" : "scale-x-0"}`}
+      />
+
+      <div className="shell flex flex-col lg:flex-row gap-8 px-4 lg:px-0">
+        <aside className="w-full lg:w-56 shrink-0">
+          <div className="sticky top-8 space-y-4">
+            <div className="flex items-center justify-between lg:justify-start gap-3 px-4 mb-4 lg:mb-8">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                  <span className="text-white text-lg font-black">EB</span>
+                </div>
+                <span className="text-xl font-black tracking-tight uppercase">
+                  Butler
+                </span>
+              </div>
+
+              {/* Mobile Logout (only visible on small screens) */}
+              <button
+                className="lg:hidden p-2 text-slate-400 hover:text-rose-400 transition-all"
+                onClick={logout}
+                title={t.signOut}
+              >
+                <SignOut size={24} weight="bold" />
+              </button>
+            </div>
+
+            <nav className="flex lg:flex-col overflow-x-auto lg:overflow-visible pb-4 lg:pb-0 gap-1 lg:space-y-1 no-scrollbar">
+              {[
+                { href: "#fleet", label: t.fleet, icon: HardDrives },
+                { href: "#ai", label: t.aiOps, icon: TerminalWindow },
+                { href: "#install", label: t.addVps, icon: SelectionPlus },
+                {
+                  href: "#notifications",
+                  label: t.notificationTitle,
+                  icon: BellRinging
+                },
+                { href: "#audit", label: t.audit, icon: FileMagnifyingGlass }
+              ].map((item) => (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  className="group flex items-center gap-3 px-4 py-3 text-sm font-bold text-slate-400 hover:text-cyan-400 hover:bg-white/5 rounded-xl transition-all border-l-2 border-transparent hover:border-cyan-400/50 whitespace-nowrap"
+                >
+                  <item.icon size={18} weight="bold" />
+                  {item.label}
+                </a>
+              ))}
+            </nav>
+          </div>
         </aside>
-        <div className="workspace">
-          <header className="topbar">
-            <div>
-              <p className="eyebrow">EdgeButler / VPS Ops</p>
-              <h1>{t.title}</h1>
-              <p className="lead">{t.lead}</p>
-              <div className="topbar-meta">
-                <span>Agent polling mode</span>
-                <span>
+
+        <div className="flex-1 space-y-8 min-w-0">
+          <header className="flex flex-col md:flex-row items-start md:items-center justify-between bg-slate-900/40 backdrop-blur-xl border border-white/5 p-6 rounded-[2rem] shadow-xl gap-6">
+            <div className="space-y-1">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-500/80">
+                EdgeButler / Core
+              </p>
+              <h1 className="text-2xl font-black tracking-tight">{t.title}</h1>
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase tracking-wider border border-emerald-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Live Polling
+                </span>
+                <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                  <Clock size={12} weight="bold" />
                   {t.lastSeen}: {formatDate(newestSnapshot, language)}
                 </span>
               </div>
             </div>
-            <div className="topbar-actions">
-              <div className="language-switch">
+
+            <div className="flex items-center gap-4 w-full md:w-auto">
+              <div className="flex items-center gap-1 p-1 bg-white/5 border border-white/10 rounded-xl flex-1 md:flex-initial justify-center">
+                <Translate
+                  size={14}
+                  className="text-slate-500 ml-2 mr-1"
+                  weight="bold"
+                />
                 <button
-                  className={language === "zh" ? "active" : "secondary"}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${language === "zh" ? "bg-white/10 text-cyan-400" : "text-slate-400 hover:text-slate-100"}`}
                   onClick={() => changeLanguage("zh")}
                 >
-                  中文
+                  中
                 </button>
                 <button
-                  className={language === "en" ? "active" : "secondary"}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${language === "en" ? "bg-white/10 text-cyan-400" : "text-slate-400 hover:text-slate-100"}`}
                   onClick={() => changeLanguage("en")}
                 >
                   EN
                 </button>
               </div>
-              <button className="secondary" onClick={logout}>
+              <button
+                className="hidden md:flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-400 hover:text-white bg-white/5 hover:bg-rose-500/10 border border-white/10 hover:border-rose-500/20 rounded-xl transition-all"
+                onClick={logout}
+              >
+                <SignOut size={16} weight="bold" />
                 {t.signOut}
               </button>
             </div>
           </header>
 
-          <section className="metric-grid">
-            <div className="metric-card">
-              <span>{servers.length}</span>
-              <p>{t.totalVps}</p>
-            </div>
-            <div className="metric-card good">
-              <span>{onlineCount}</span>
-              <p>{t.online}</p>
-            </div>
-            <div className="metric-card danger">
-              <span>{offlineCount}</span>
-              <p>Offline</p>
-            </div>
-            <div className="metric-card warn">
-              <span>{pendingOperations.length}</span>
-              <p>{t.pending}</p>
-            </div>
-            <div className="metric-card">
-              <span>{notifications.length}</span>
-              <p>{t.notifications}</p>
-            </div>
+          <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 animate-stagger-1">
+            {[
+              {
+                label: t.totalVps,
+                value: servers.length,
+                color: "text-white",
+                icon: Monitor
+              },
+              {
+                label: t.online,
+                value: onlineCount,
+                color: "text-emerald-400",
+                icon: CheckCircle
+              },
+              {
+                label: "Offline",
+                value: offlineCount,
+                color: "text-rose-400",
+                icon: WarningCircle
+              },
+              {
+                label: t.pending,
+                value: pendingOperations.length,
+                color: "text-amber-400",
+                icon: Clock
+              },
+              {
+                label: t.notifications,
+                value: notifications.length,
+                color: "text-cyan-400",
+                icon: BellRinging
+              }
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="bg-slate-900/50 border border-white/5 p-5 rounded-2xl shadow-lg transition-transform hover:-translate-y-0.5 flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                    {item.label}
+                  </p>
+                  <item.icon
+                    size={16}
+                    className="text-slate-600"
+                    weight="bold"
+                  />
+                </div>
+                <span className={`text-3xl font-black ${item.color}`}>
+                  {item.value}
+                </span>
+              </div>
+            ))}
           </section>
 
-          {error && <div className="alert">{error}</div>}
-          {notice && <div className="notice">{notice}</div>}
+          {error && (
+            <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300">
+              {error}
+            </div>
+          )}
+          {notice && (
+            <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-xl text-sm font-medium animate-in fade-in slide-in-from-top-2 duration-300">
+              {notice}
+            </div>
+          )}
 
-          <section className="panel fleet-panel" id="fleet">
-            <div className="panel-header">
-              <div>
-                <h2>{t.fleet}</h2>
-                <p>{t.fleetHelp}</p>
+          <section className="space-y-6 animate-stagger-2" id="fleet">
+            <div className="flex items-end justify-between px-2">
+              <div className="space-y-1">
+                <h2 className="text-xl font-black tracking-tight">{t.fleet}</h2>
+                <p className="text-xs font-medium text-slate-500">
+                  {t.fleetHelp}
+                </p>
               </div>
-              <div className="button-row">
+              <div className="flex gap-2">
                 <button
-                  className="secondary"
+                  className="px-4 py-2 text-xs font-bold bg-white/5 border border-white/10 rounded-xl text-slate-300 hover:text-white hover:bg-white/10 transition-all"
                   disabled={loading}
                   onClick={reload}
                 >
                   {t.reload}
                 </button>
                 <button
-                  className="secondary"
+                  className="px-4 py-2 text-xs font-bold bg-white/5 border border-white/10 rounded-xl text-slate-300 hover:text-white hover:bg-white/10 transition-all"
                   disabled={loading}
                   onClick={refreshAll}
                 >
@@ -776,50 +947,77 @@ export default function App() {
             </div>
 
             {servers.length === 0 ? (
-              <div className="empty">{t.noVps}</div>
+              <div className="flex flex-col items-center justify-center p-12 bg-slate-900/20 border border-dashed border-white/10 rounded-[2rem] text-slate-500 space-y-2">
+                <p className="font-bold">{t.noVps}</p>
+              </div>
             ) : (
-              <div className="server-grid">
+              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6">
                 {servers.map((server) => (
-                  <article className="server-card" key={server.id}>
-                    <div className="server-title">
-                      <div>
-                        <h3>{server.name}</h3>
-                        <p>{server.host}</p>
+                  <article
+                    className="bg-slate-900/40 backdrop-blur-sm border border-white/5 p-6 rounded-3xl shadow-lg transition-all hover:border-white/10 hover:shadow-cyan-500/5 group"
+                    key={server.id}
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="space-y-1 min-w-0">
+                        <h3 className="text-lg font-black tracking-tight text-white truncate">
+                          {server.name}
+                        </h3>
+                        <p className="text-xs font-bold text-cyan-400/70 font-mono tracking-tighter truncate">
+                          {server.host}
+                        </p>
                       </div>
                       <StatusPill status={server.status} language={language} />
                     </div>
+
                     <Snapshot
                       snapshot={server.lastSnapshot}
                       language={language}
                     />
-                    <div className="server-meta">
-                      <span>ID: {server.id}</span>
-                      <span>
-                        {t.location}: {server.location}
+
+                    <div className="mt-6 pt-6 border-t border-white/5 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                      <span className="flex items-center gap-1">
+                        <IdentificationCard size={12} weight="bold" /> ID:{" "}
+                        <span className="text-slate-300 font-mono">
+                          {server.id.slice(-8)}
+                        </span>
                       </span>
-                      <span>
-                        {t.lastSeen}: {formatDate(server.lastSeenAt, language)}
+                      <span className="flex items-center gap-1">
+                        <MapPin size={12} weight="bold" /> {t.location}:{" "}
+                        <span className="text-slate-300">
+                          {server.location}
+                        </span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock size={12} weight="bold" /> {t.lastSeen}:{" "}
+                        <span className="text-slate-300">
+                          {formatDate(server.lastSeenAt, language)}
+                        </span>
                       </span>
                     </div>
-                    <div className="button-row">
+
+                    <div className="mt-6 grid grid-cols-3 gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                       <button
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] font-black uppercase tracking-widest bg-white/5 hover:bg-cyan-500/10 text-slate-400 hover:text-cyan-400 border border-white/5 hover:border-cyan-500/20 rounded-lg transition-all"
                         disabled={loading}
                         onClick={() => refreshServer(server.id)}
                       >
+                        <RocketLaunch size={12} weight="bold" />
                         {t.refreshOne}
                       </button>
                       <button
-                        className="secondary"
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] font-black uppercase tracking-widest bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 hover:border-white/20 rounded-lg transition-all"
                         disabled={loading}
                         onClick={() => editServer(server)}
                       >
+                        <IdentificationCard size={12} weight="bold" />
                         {t.edit}
                       </button>
                       <button
-                        className="secondary"
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 text-[10px] font-black uppercase tracking-widest bg-white/5 hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 border border-white/5 hover:border-rose-500/20 rounded-lg transition-all"
                         disabled={loading}
                         onClick={() => deleteServer(server)}
                       >
+                        <Trash size={12} weight="bold" />
                         {t.delete}
                       </button>
                     </div>
@@ -829,162 +1027,237 @@ export default function App() {
             )}
           </section>
 
-          <section className="grid two">
-            <div className="panel" id="install">
-              <div className="panel-header">
-                <div>
-                  <h2>{t.addVps}</h2>
-                  <p>{t.addVpsHelp}</p>
-                </div>
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-stagger-3">
+            <div
+              className="bg-slate-900/40 backdrop-blur-sm border border-white/5 p-8 rounded-[2rem] shadow-xl space-y-6"
+              id="install"
+            >
+              <div className="space-y-1">
+                <h2 className="text-xl font-black tracking-tight text-white">
+                  {t.addVps}
+                </h2>
+                <p className="text-xs font-medium text-slate-500">
+                  {t.addVpsHelp}
+                </p>
               </div>
-              <label>
-                {t.customName}
-                <input
-                  value={installForm.name}
-                  onChange={(event) =>
-                    setInstallForm((current) => ({
-                      ...current,
-                      name: event.target.value
-                    }))
-                  }
-                  placeholder="Hong Kong proxy 01"
-                />
-              </label>
-              <label>
-                {t.username}
-                <input
-                  value={installForm.username}
-                  onChange={(event) =>
-                    setInstallForm((current) => ({
-                      ...current,
-                      username: event.target.value
-                    }))
-                  }
-                  placeholder="root"
-                />
-              </label>
-              <label>
-                {t.location}
-                <input
-                  value={installForm.location}
-                  onChange={(event) =>
-                    setInstallForm((current) => ({
-                      ...current,
-                      location: event.target.value
-                    }))
-                  }
-                  placeholder="Hong Kong"
-                />
-              </label>
-              <button disabled={loading} onClick={createInstallToken}>
-                {t.generateInstall}
-              </button>
-              {installToken && (
-                <div className="command-box">
-                  <div>
-                    <strong>{t.expires}</strong>
-                    <span>{formatDate(installToken.expiresAt, language)}</span>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
+                      {t.customName}
+                    </label>
+                    <input
+                      value={installForm.name}
+                      onChange={(event) =>
+                        setInstallForm((current) => ({
+                          ...current,
+                          name: event.target.value
+                        }))
+                      }
+                      className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                      placeholder="e.g. HK-Node-01"
+                    />
                   </div>
-                  <pre>{installToken.installCommand}</pre>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
+                      {t.username}
+                    </label>
+                    <input
+                      value={installForm.username}
+                      onChange={(event) =>
+                        setInstallForm((current) => ({
+                          ...current,
+                          username: event.target.value
+                        }))
+                      }
+                      className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                      placeholder="root"
+                    />
+                  </div>
                 </div>
-              )}
-              <label>
-                {t.agentEndpoint}
-                <input
-                  value={agentEndpoint}
-                  onChange={(event) => setAgentEndpoint(event.target.value)}
-                  placeholder="https://ops.example.com"
-                />
-              </label>
-              <button
-                className="secondary"
-                disabled={loading || !agentEndpoint.trim()}
-                onClick={createEndpointUpdate}
-              >
-                {t.updateAgentEndpoint}
-              </button>
-            </div>
 
-            <div className="panel" id="ai">
-              <div className="panel-header">
-                <div>
-                  <h2>{t.aiOps}</h2>
-                  <p>{t.aiOpsHelp}</p>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
+                    {t.location}
+                  </label>
+                  <input
+                    value={installForm.location}
+                    onChange={(event) =>
+                      setInstallForm((current) => ({
+                        ...current,
+                        location: event.target.value
+                      }))
+                    }
+                    className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                    placeholder="e.g. Hong Kong"
+                  />
                 </div>
-              </div>
-              <textarea
-                value={aiCommand}
-                onChange={(event) => setAiCommand(event.target.value)}
-                placeholder="Show nginx service health on Hong Kong VPS"
-              />
-              <div className="button-row">
+
                 <button
-                  disabled={loading || !aiCommand.trim()}
-                  onClick={runAiCommand}
-                >
-                  {t.runAi}
-                </button>
-                <button
-                  className="secondary"
                   disabled={loading}
-                  onClick={refreshAll}
+                  onClick={createInstallToken}
+                  className="w-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 font-bold py-3 rounded-xl border border-cyan-500/20 transition-all"
                 >
-                  {t.refreshAll}
+                  {t.generateInstall}
                 </button>
+
+                {installToken && (
+                  <div className="bg-black/40 border border-white/5 rounded-2xl p-5 space-y-3">
+                    <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-slate-500 border-b border-white/5 pb-2">
+                      <span>{t.expires}</span>
+                      <span className="text-amber-400">
+                        {formatDate(installToken.expiresAt, language)}
+                      </span>
+                    </div>
+                    <pre className="text-xs font-mono text-cyan-400 overflow-x-auto p-1 leading-relaxed">
+                      {installToken.installCommand}
+                    </pre>
+                  </div>
+                )}
+
+                <div className="pt-6 border-t border-white/5 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
+                      {t.agentEndpoint}
+                    </label>
+                    <input
+                      value={agentEndpoint}
+                      onChange={(event) => setAgentEndpoint(event.target.value)}
+                      className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                      placeholder="https://ops.example.com"
+                    />
+                  </div>
+                  <button
+                    className="w-full bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-3 rounded-xl border border-white/10 transition-all text-xs"
+                    disabled={loading || !agentEndpoint.trim()}
+                    onClick={createEndpointUpdate}
+                  >
+                    {t.updateAgentEndpoint}
+                  </button>
+                </div>
               </div>
-              {aiOutput && <pre className="output">{aiOutput}</pre>}
             </div>
 
-            <div className="panel">
-              <div className="panel-header">
-                <div>
-                  <h2>{t.aiRules}</h2>
-                  <p>{t.aiRulesHelp}</p>
+            <div
+              className="bg-slate-900/40 backdrop-blur-sm border border-white/5 p-8 rounded-[2rem] shadow-xl flex flex-col"
+              id="ai"
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
+                  <TerminalWindow size={20} weight="bold" />
+                </div>
+                <div className="space-y-1">
+                  <h2 className="text-xl font-black tracking-tight text-white">
+                    {t.aiOps}
+                  </h2>
+                  <p className="text-xs font-medium text-slate-500">
+                    {t.aiOpsHelp}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex-1 flex flex-col space-y-4">
+                <textarea
+                  value={aiCommand}
+                  onChange={(event) => setAiCommand(event.target.value)}
+                  className="flex-1 bg-white/5 border border-white/5 rounded-2xl p-4 text-sm text-white placeholder:text-slate-600 focus:border-cyan-500/50 transition-all outline-none resize-none min-h-[120px]"
+                  placeholder="e.g. Check CPU usage on all Hong Kong nodes"
+                />
+
+                <div className="flex gap-3">
+                  <button
+                    disabled={loading || !aiCommand.trim()}
+                    onClick={runAiCommand}
+                    className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black py-3 rounded-xl shadow-lg shadow-cyan-500/20 transition-all transform active:scale-[0.98]"
+                  >
+                    {t.runAi}
+                  </button>
+                </div>
+
+                {aiOutput && (
+                  <div className="mt-4 bg-black/60 border border-white/5 rounded-2xl p-5 overflow-hidden">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3 border-b border-white/5 pb-2">
+                      Response
+                    </p>
+                    <pre className="text-sm font-medium text-slate-300 whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto">
+                      {aiOutput}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-slate-900/40 backdrop-blur-sm border border-white/5 p-8 rounded-[2rem] shadow-xl space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
+                  <FileMagnifyingGlass size={20} weight="bold" />
+                </div>
+                <div className="space-y-1">
+                  <h2 className="text-xl font-black tracking-tight text-white">
+                    {t.aiRules}
+                  </h2>
+                  <p className="text-xs font-medium text-slate-500">
+                    {t.aiRulesHelp}
+                  </p>
                 </div>
               </div>
               <textarea
                 value={rules}
                 onChange={(event) => setRules(event.target.value)}
-                placeholder="All commands can execute directly. Delete/remove commands require yes/no confirmation."
+                className="w-full bg-white/5 border border-white/5 rounded-2xl p-4 text-sm text-white placeholder:text-slate-600 focus:border-cyan-500/50 transition-all outline-none resize-none min-h-[120px]"
+                placeholder="Custom AI behavior rules..."
               />
-              <div className="button-row">
-                <button disabled={loading} onClick={saveRules}>
-                  {t.saveRules}
-                </button>
-              </div>
+              <button
+                disabled={loading}
+                onClick={saveRules}
+                className="w-full bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-3 rounded-xl border border-white/10 transition-all text-xs"
+              >
+                {t.saveRules}
+              </button>
             </div>
           </section>
 
           {pendingOperations.length > 0 && (
-            <section className="panel danger-panel">
-              <div className="panel-header">
-                <div>
-                  <h2>{t.pendingTitle}</h2>
-                  <p>{t.pendingHelp}</p>
-                </div>
+            <section className="bg-rose-500/5 border border-rose-500/10 p-8 rounded-[2rem] shadow-xl space-y-6">
+              <div className="space-y-1">
+                <h2 className="text-xl font-black tracking-tight text-rose-400 uppercase tracking-widest">
+                  {t.pendingTitle}
+                </h2>
+                <p className="text-xs font-medium text-slate-500">
+                  {t.pendingHelp}
+                </p>
               </div>
-              <div className="pending-list">
+              <div className="grid gap-4">
                 {pendingOperations.map((operation) => (
-                  <div className="pending-row" key={operation.id}>
-                    <div>
-                      <strong>{operation.action}</strong>
-                      <p>
+                  <div
+                    className="flex items-center justify-between p-6 bg-rose-500/5 border border-rose-500/10 rounded-2xl transition-all hover:bg-rose-500/10"
+                    key={operation.id}
+                  >
+                    <div className="space-y-1">
+                      <strong className="text-rose-400 font-black tracking-tight">
+                        {operation.action}
+                      </strong>
+                      <p className="text-sm font-medium text-slate-300">
                         {operation.serverName} /{" "}
-                        {operation.command || operation.target || "no target"}
+                        <span className="font-mono text-xs">
+                          {operation.command || operation.target || "no target"}
+                        </span>
                       </p>
-                      <span>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
                         {t.expires}: {formatDate(operation.expiresAt, language)}
-                      </span>
+                      </p>
                     </div>
-                    <div className="button-row">
+                    <div className="flex gap-2">
                       <button
+                        className="px-6 py-2 bg-rose-500 hover:bg-rose-400 text-white text-xs font-black uppercase tracking-widest rounded-xl shadow-lg shadow-rose-500/20 transition-all active:scale-95"
                         disabled={loading}
                         onClick={() => confirmOperation(operation.id)}
                       >
                         {t.confirm}
                       </button>
                       <button
-                        className="secondary"
+                        className="px-6 py-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 rounded-xl text-xs font-black uppercase tracking-widest transition-all active:scale-95"
                         disabled={loading}
                         onClick={() => cancelOperation(operation.id)}
                       >
@@ -997,16 +1270,29 @@ export default function App() {
             </section>
           )}
 
-          <section className="panel" id="notifications">
-            <div className="panel-header">
-              <div>
-                <h2>{t.notificationTitle}</h2>
-                <p>{t.notificationHelp}</p>
+          <section
+            className="bg-slate-900/40 backdrop-blur-sm border border-white/5 p-8 rounded-[2rem] shadow-xl space-y-8"
+            id="notifications"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+                <BellRinging size={20} weight="bold" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-xl font-black tracking-tight text-white">
+                  {t.notificationTitle}
+                </h2>
+                <p className="text-xs font-medium text-slate-500">
+                  {t.notificationHelp}
+                </p>
               </div>
             </div>
-            <div className="notification-form">
-              <label>
-                {t.name}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 items-end">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
+                  {t.name}
+                </label>
                 <input
                   value={notificationForm.name}
                   onChange={(event) =>
@@ -1015,11 +1301,14 @@ export default function App() {
                       name: event.target.value
                     }))
                   }
-                  placeholder="Ops WeCom"
+                  className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                  placeholder="e.g. Ops Alert"
                 />
-              </label>
-              <label>
-                {t.type}
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
+                  {t.type}
+                </label>
                 <select
                   value={notificationForm.type}
                   onChange={(event) =>
@@ -1028,15 +1317,25 @@ export default function App() {
                       type: event.target.value as NotificationChannel["type"]
                     }))
                   }
+                  className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none appearance-none"
                 >
-                  <option value="wecom">Enterprise WeChat</option>
-                  <option value="telegram">Telegram</option>
-                  <option value="generic_webhook">Generic webhook</option>
+                  <option value="wecom" className="bg-slate-900">
+                    Enterprise WeChat
+                  </option>
+                  <option value="telegram" className="bg-slate-900">
+                    Telegram
+                  </option>
+                  <option value="generic_webhook" className="bg-slate-900">
+                    Generic webhook
+                  </option>
                 </select>
-              </label>
-              {notificationForm.type !== "telegram" && (
-                <label>
-                  {t.webhookUrl}
+              </div>
+
+              {notificationForm.type !== "telegram" ? (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
+                    {t.webhookUrl}
+                  </label>
                   <input
                     value={notificationForm.url}
                     onChange={(event) =>
@@ -1045,13 +1344,15 @@ export default function App() {
                         url: event.target.value
                       }))
                     }
+                    className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
                     placeholder="https://..."
                   />
-                </label>
-              )}
-              {notificationForm.type === "telegram" && (
-                <label>
-                  {t.botToken}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
+                    {t.botToken}
+                  </label>
                   <input
                     type="password"
                     value={notificationForm.botToken}
@@ -1061,12 +1362,16 @@ export default function App() {
                         botToken: event.target.value
                       }))
                     }
-                    placeholder="123456:ABC..."
+                    className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
+                    placeholder="Token"
                   />
-                </label>
+                </div>
               )}
-              <label>
-                {t.chatId}
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">
+                  {t.chatId}
+                </label>
                 <input
                   value={notificationForm.chatId}
                   onChange={(event) =>
@@ -1075,64 +1380,80 @@ export default function App() {
                       chatId: event.target.value
                     }))
                   }
+                  className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500/50 transition-all outline-none"
                   placeholder="Only for Telegram"
                 />
-              </label>
-              <button
-                disabled={loading || !notificationForm.name.trim()}
-                onClick={saveNotification}
-              >
-                {t.saveChannel}
-              </button>
-              <button
-                className="secondary"
-                disabled={loading || !notificationForm.name.trim()}
-                onClick={saveAndTestNotification}
-              >
-                {t.saveAndTest}
-              </button>
+              </div>
+
+              <div className="flex gap-2 col-span-1 md:col-span-2 xl:col-span-1">
+                <button
+                  disabled={loading || !notificationForm.name.trim()}
+                  onClick={saveNotification}
+                  className="flex-1 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 font-bold py-3 rounded-xl border border-cyan-500/20 transition-all text-xs uppercase tracking-widest"
+                >
+                  {t.saveChannel}
+                </button>
+                <button
+                  disabled={loading || !notificationForm.name.trim()}
+                  onClick={saveAndTestNotification}
+                  className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 font-bold py-3 rounded-xl border border-white/10 transition-all text-xs uppercase tracking-widest"
+                >
+                  {t.saveAndTest}
+                </button>
+              </div>
             </div>
+
             {notifications.length > 0 && (
-              <div className="channel-list">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {notifications.map((channel) => (
-                  <div className="channel-row" key={channel.id}>
-                    <div>
-                      <strong>{channel.name}</strong>
-                      <p>{channel.type}</p>
-                      {channel.type === "telegram" &&
-                        channel.telegramWebhookUrl && (
-                          <p className="muted">
-                            Webhook: {channel.telegramWebhookUrl}
-                          </p>
-                        )}
+                  <div
+                    className="p-5 bg-white/5 border border-white/5 rounded-2xl flex items-center justify-between group transition-all hover:bg-white/10"
+                    key={channel.id}
+                  >
+                    <div className="space-y-1">
+                      <strong className="text-white font-black tracking-tight">
+                        {channel.name}
+                      </strong>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                        {channel.type}
+                      </p>
                       {channel.type === "telegram" &&
                         channel.telegramWebhookStatus && (
-                          <p className="muted">
+                          <p className="text-[10px] font-bold text-cyan-400/80 uppercase truncate max-w-[200px]">
                             {channel.telegramWebhookStatus}
                           </p>
                         )}
                     </div>
-                    <div className="button-row">
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
-                        className="secondary"
+                        className="p-2 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-all"
                         disabled={loading}
                         onClick={() => testNotification(channel.id)}
+                        title={t.test}
                       >
-                        {t.test}
+                        <span className="text-[10px] font-black uppercase px-2">
+                          {t.test}
+                        </span>
                       </button>
                       <button
-                        className="secondary"
+                        className="p-2 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-all"
                         disabled={loading}
                         onClick={() => editNotification(channel)}
+                        title={t.editChannel}
                       >
-                        {t.editChannel}
+                        <span className="text-[10px] font-black uppercase px-2">
+                          {t.editChannel}
+                        </span>
                       </button>
                       <button
-                        className="secondary"
+                        className="p-2 text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 rounded-lg transition-all"
                         disabled={loading}
                         onClick={() => deleteNotification(channel.id)}
+                        title={t.delete}
                       >
-                        {t.delete}
+                        <span className="text-[10px] font-black uppercase px-2">
+                          {t.delete}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -1141,23 +1462,41 @@ export default function App() {
             )}
           </section>
 
-          <section className="panel" id="audit">
-            <div className="panel-header">
-              <div>
-                <h2>{t.audit}</h2>
-                <p>{t.auditHelp}</p>
-              </div>
+          <section
+            className="bg-slate-900/40 backdrop-blur-sm border border-white/5 p-8 rounded-[2rem] shadow-xl space-y-6 animate-stagger-4"
+            id="audit"
+          >
+            <div className="space-y-1">
+              <h2 className="text-xl font-black tracking-tight text-white">
+                {t.audit}
+              </h2>
+              <p className="text-xs font-medium text-slate-500">
+                {t.auditHelp}
+              </p>
             </div>
             {operations.length === 0 ? (
-              <div className="empty">{t.noOps}</div>
+              <div className="flex flex-col items-center justify-center p-12 bg-slate-900/20 border border-dashed border-white/10 rounded-[2rem] text-slate-500 space-y-2">
+                <p className="font-bold">{t.noOps}</p>
+              </div>
             ) : (
-              <div className="log-list">
+              <div className="space-y-2">
                 {operations.slice(0, 20).map((operation) => (
-                  <div className="log-row" key={operation.id}>
-                    <span>{formatDate(operation.createdAt, language)}</span>
-                    <strong>{operation.action}</strong>
-                    <em>{operation.source}</em>
-                    <code>{operation.serverId || "-"}</code>
+                  <div
+                    className="grid grid-cols-4 gap-4 p-4 bg-white/5 border border-white/5 rounded-xl text-xs font-bold transition-all hover:bg-white/10 group"
+                    key={operation.id}
+                  >
+                    <span className="text-slate-500 group-hover:text-slate-400">
+                      {formatDate(operation.createdAt, language)}
+                    </span>
+                    <strong className="text-slate-200 uppercase tracking-tight">
+                      {operation.action}
+                    </strong>
+                    <em className="not-italic text-cyan-400/80 uppercase tracking-widest text-[10px]">
+                      {operation.source}
+                    </em>
+                    <code className="text-slate-400 font-mono truncate">
+                      {operation.serverId || "-"}
+                    </code>
                   </div>
                 ))}
               </div>
