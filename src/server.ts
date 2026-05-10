@@ -368,6 +368,14 @@ function withDerivedServerStatus(server: ManagedServer): ManagedServer {
   };
 }
 
+function containsAnyCode(value: string, codes: number[]) {
+  const set = new Set(codes);
+  for (const char of value) {
+    if (set.has(char.charCodeAt(0))) return true;
+  }
+  return false;
+}
+
 function isDeleteCommand(action: string, target = "", command = "") {
   const text = `${action} ${target} ${command}`.toLowerCase();
   return [
@@ -1210,6 +1218,11 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       return await this.chatOnly(trimmed);
     }
 
+    if (!this.data.activeServerId && !this.findMentionedServer(trimmed)) {
+      const platformScopeBlock = this.platformScopeBlockMessage(trimmed);
+      if (platformScopeBlock) return platformScopeBlock;
+    }
+
     let plan =
       this.planBuiltInCommand(trimmed) ||
       this.planSimpleCommand(trimmed) ||
@@ -1234,6 +1247,9 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     }
 
     const mentionedServer = this.findMentionedServer(trimmed);
+    if (!mentionedServer && !this.data.activeServerId) {
+      return this.scopeMissingMessage(plan.action, plan.target, plan.command);
+    }
     const server = mentionedServer
       ? this.resolveServer(mentionedServer.id)
       : this.resolveServer(
@@ -1588,16 +1604,26 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
   }
 
   private answerPlatformInventoryQuestion(command: string) {
-    const lower = command.toLowerCase();
+    const hasChineseInventorySignal = containsAnyCode(
+      command,
+      [
+        20960, 22810, 21738, 21517, 28165, 21015, 22312, 31163, 27491, 36830,
+        38142, 22833
+      ]
+    );
     const mentionsFleet =
       /(vps|server|servers|agent|agents|client|clients)/i.test(command) ||
-      /服务器|主机|客户端|节点/.test(command);
+      hasChineseInventorySignal ||
+      (/[\u51e0\u591a\u54ea\u540d\u6e05\u5217]/.test(command) &&
+        /[\u8fde\u94fe\u5728\u79bb\u5931\u6b63]/.test(command));
     if (!mentionsFleet) return undefined;
 
     const asksInventory =
-      /几台|多少|几个|有哪些|名称|名字|清单|列表|在线|离线|正常|连接|链接|失联|失链|registered|connected|online|offline|list|count/i.test(
+      hasChineseInventorySignal ||
+      /[\u51e0\u591a\u54ea\u540d\u6e05\u5217\u5728\u79bb\u6b63\u8fde\u94fe\u5931]/.test(
         command
-      );
+      ) ||
+      /registered|connected|online|offline|list|count/i.test(command);
     if (!asksInventory) return undefined;
 
     const servers = this.data.servers.map(withDerivedServerStatus);
@@ -1605,41 +1631,81 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
     const offline = servers.filter((server) => server.status === "offline");
     const pending = servers.filter((server) => server.status === "pending");
     const wantsOnlineOnly =
-      /在线|正常|连接正常|链接正常|connected|online/i.test(command) &&
-      !/离线|失联|失链|offline/i.test(command);
-    const wantsOfflineOnly = /离线|失联|失链|offline/i.test(command);
+      containsAnyCode(command, [22312, 27491, 36830, 38142]) &&
+      !containsAnyCode(command, [31163, 22833]);
+    const wantsOfflineOnly =
+      containsAnyCode(command, [31163, 22833]) || /offline/i.test(command);
     const targetServers = wantsOfflineOnly
       ? offline
       : wantsOnlineOnly
         ? online
         : servers;
     const heading = wantsOfflineOnly
-      ? `当前离线 VPS：${offline.length} 台`
+      ? `Current offline VPS: ${offline.length}`
       : wantsOnlineOnly
-        ? `当前连接正常 VPS：${online.length} 台`
-        : `当前已注册 VPS：${servers.length} 台；在线 ${online.length} 台，离线 ${offline.length} 台，待注册 ${pending.length} 台`;
+        ? `Current connected VPS: ${online.length}`
+        : `Registered VPS: ${servers.length}; online ${online.length}; offline ${offline.length}; pending ${pending.length}`;
     const detail = targetServers.length
       ? targetServers
           .map((server) => {
             const lastSeen = server.lastSeenAt
               ? new Date(server.lastSeenAt).toISOString()
               : "never";
-            return `- ${server.name}：${server.status}，IP ${server.host || "unknown"}，位置 ${server.location || "unknown"}，最后心跳 ${lastSeen}`;
+            return `- ${server.name}: ${server.status}; IP ${server.host || "unknown"}; location ${server.location || "unknown"}; lastSeen ${lastSeen}`;
           })
           .join("\n")
-      : "- 无";
+      : "- none";
 
     return [
-      "[EdgeButler] VPS 状态",
+      "[EdgeButler] VPS Status",
       heading,
       detail,
       "",
-      lower.includes("链接") || lower.includes("连接")
-        ? "说明：这里的“连接正常”按 agent 最近心跳判断，不会执行任何 VPS shell 命令。"
-        : "说明：该结果来自 EdgeButler 内部注册表和 agent 心跳，不会执行任何 VPS shell 命令。"
+      /[\u8fde\u94fe]/.test(command)
+        ? "Note: connected means recent agent heartbeat. No VPS shell command was executed."
+        : "Note: this result comes from the EdgeButler registry and agent heartbeat. No VPS shell command was executed."
     ].join("\n");
   }
 
+  private platformScopeBlockMessage(command: string) {
+    const hasChineseVpsOperationSignal = containsAnyCode(
+      command,
+      [
+        36827, 31243, 36127, 36733, 20869, 23384, 30913, 30424, 31471, 21475,
+        26381, 21153, 26085, 24535, 25991, 20214, 37096, 32626, 23433, 35013,
+        20572, 27490, 37325, 21551
+      ]
+    );
+    const looksLikeVpsOperation =
+      /process|load|memory|cpu|disk|port|service|log|file|deploy|install|stop|restart/i.test(
+        command
+      ) ||
+      hasChineseVpsOperationSignal ||
+      /[\u8fdb\u7a0b\u8d1f\u8f7d\u5185\u5b58\u78c1\u76d8\u7aef\u53e3\u670d\u52a1\u65e5\u5fd7\u6587\u4ef6\u90e8\u7f72\u5b89\u88c5\u505c\u6b62\u91cd\u542f]/.test(
+        command
+      );
+    return looksLikeVpsOperation
+      ? this.scopeMissingMessage("vps_operation")
+      : undefined;
+  }
+  private scopeMissingMessage(action: string, target = "", command = "") {
+    return [
+      "[EdgeButler] Command not executed",
+      "",
+      "Reason: no active VPS is selected, so VPS operations are blocked in platform scope.",
+      "Current scope: platform",
+      `Detected action: ${action || "unknown"}`,
+      target ? `Target: ${target}` : "",
+      command ? `Command: ${command}` : "",
+      "",
+      "Choose an execution scope first:",
+      "/zo",
+      "/new zo",
+      "or use /all <command> to run on all online VPS one by one."
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   private planBuiltInCommand(command: string): ActionPlan | undefined {
     const lower = command.toLowerCase();
     const server = [...this.data.servers]
@@ -1663,6 +1729,24 @@ export class EdgeButler extends Agent<Env, EdgeButlerState> {
       "\\u5206\\u6790|\\u4f5c\\u7528|\\u7528\\u9014|analy[sz]e",
       "i"
     );
+    const hasChineseSystemReadSignal = containsAnyCode(
+      command,
+      [
+        31995, 32479, 36127, 36733, 20869, 23384, 30913, 30424, 30828, 30424,
+        23481, 37327, 32593, 32476, 31471, 21475, 29256, 26412, 29366, 24577
+      ]
+    );
+    const systemReadPattern =
+      /系统|负载|内存|cpu|磁盘|硬盘|容量|网络|端口|版本|状态|load|memory|disk|network|port|os|uptime|status/i;
+    if (systemReadPattern.test(command) || hasChineseSystemReadSignal) {
+      return {
+        type: "action",
+        serverId: server?.id,
+        serverName: server?.name,
+        action: "server_summary",
+        needsConfirmation: false
+      };
+    }
     const listPattern = new RegExp(
       "\\u660e\\u7ec6|\\u5217\\u8868|\\u6240\\u6709|\\u5168\\u90e8|\\u54ea\\u4e9b|\\u8fd0\\u884c|list|all|what|running",
       "i"
